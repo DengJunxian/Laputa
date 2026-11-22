@@ -1,0 +1,9 @@
+{
+  "root_seed": 410001,
+  "ticks": 5,
+  "households": 4,
+  "firms": 2,
+  "fault_tick": null,
+  "archive_observations": true,
+  "securities": {"shock_tick": 2, "selective_exposure": true}
+}

@@ -1,0 +1,77 @@
+{
+  "ticks": 8,
+  "households": 6,
+  "firms": 2,
+  "root_seed": 710041,
+  "fault_tick": null,
+  "archive_observations": true,
+  "fiscal": {
+    "initial_cash_minor": 18,
+    "announced_tick": 4,
+    "effective_tick": 7,
+    "audience": [3],
+    "disclosure_cost_minor": 2,
+    "brackets": [{"start_minor": 0, "rate_bps": 0}],
+    "transfer_recipients": [3],
+    "transfer_minor": 1
+  },
+  "banking": {
+    "credit_creation_mode": "bank_credit_creation",
+    "loan_to_capital_multiple": 30,
+    "initial_bank_cash": {"bank:a": 10, "bank:b": 9},
+    "run_notice": {
+      "tick": 4,
+      "source_request": "first-delay",
+      "withdrawal_by_recipient": {"household:0001": 6, "household:0002": 2},
+      "react_to_verified_delay": true,
+      "response_mode": "actor",
+      "disclosure_funding": {
+        "cost_per_recipient_minor": 3,
+        "budget_cap_minor": 6,
+        "authorized_through_tick": 4
+      }
+    },
+    "treasury_support": {
+      "bank_id": "bank:b",
+      "amount_minor": 9,
+      "disbursement_tick": 4,
+      "maturity_tick": 6
+    },
+    "operations": [
+      {"tick": 1, "operation_id": "opening-deposit", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0001", "amount_minor": 9},
+      {"tick": 1, "operation_id": "second-opening-deposit", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0002", "amount_minor": 3},
+      {"tick": 1, "operation_id": "trigger-credit", "kind": "approve",
+       "bank": "bank:a", "actor": "household:0000", "amount_minor": 20, "installments": 1, "payment_interval": 4},
+      {"tick": 1, "operation_id": "interbank-bridge", "kind": "approve",
+       "bank": "bank:a", "actor": "bank:b", "amount_minor": 8, "installments": 1,
+       "payment_interval": 3, "default_after_misses": 1},
+      {"tick": 1, "operation_id": "local-working-credit", "kind": "approve",
+       "bank": "bank:b", "actor": "household:0004", "amount_minor": 6, "installments": 1,
+       "payment_interval": 10},
+      {"tick": 1, "operation_id": "stress-credit", "kind": "approve",
+       "bank": "bank:a", "actor": "household:0004", "amount_minor": 240, "installments": 1,
+       "payment_interval": 5, "default_after_misses": 1},
+      {"tick": 2, "operation_id": "draw-interbank-credit", "kind": "payment",
+       "bank": "bank:a", "actor": "bank:b", "target_bank": "bank:b", "target_actor": "household:0004", "amount_minor": 8},
+      {"tick": 2, "operation_id": "redeem-draw", "kind": "withdraw",
+       "bank": "bank:b", "actor": "household:0004", "amount_minor": 14, "expires_tick": 2},
+      {"tick": 2, "operation_id": "stress-transfer", "kind": "payment",
+       "bank": "bank:a", "actor": "household:0004", "target_bank": "bank:a",
+       "target_actor": "household:0005", "amount_minor": 240},
+      {"tick": 3, "operation_id": "cross-bank", "kind": "payment",
+       "bank": "bank:a", "actor": "household:0001", "target_bank": "bank:b",
+       "target_actor": "household:0002", "amount_minor": 1},
+      {"tick": 3, "operation_id": "first-delay", "kind": "withdraw",
+       "bank": "bank:a", "actor": "household:0000", "amount_minor": 15, "expires_tick": 5},
+      {"tick": 6, "operation_id": "borrower-bank-inflow", "kind": "deposit",
+       "bank": "bank:b", "actor": "household:0003", "amount_minor": 5},
+      {"tick": 7, "operation_id": "stress-receivership", "kind": "resolve", "bank": "bank:a"},
+      {"tick": 8, "operation_id": "release-unpaid-interbank", "kind": "release", "loan_id": "interbank-bridge"},
+      {"tick": 8, "operation_id": "stress-recovery", "kind": "recover", "loan_id": "stress-credit", "amount_minor": 8},
+      {"tick": 8, "operation_id": "stress-release", "kind": "release", "loan_id": "stress-credit"},
+      {"tick": 8, "operation_id": "stress-liquidation", "kind": "resolve", "bank": "bank:a"}
+    ]
+  }
+}

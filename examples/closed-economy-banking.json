@@ -1,0 +1,37 @@
+{
+  "ticks": 5,
+  "households": 4,
+  "root_seed": 7,
+  "fault_tick": null,
+  "banking": {
+    "credit_creation_mode": "bank_credit_creation",
+    "initial_bank_cash": {"bank:a": 2, "bank:b": 8},
+    "guarantee_budget_minor": 10,
+    "guarantee_interbank": false,
+    "run_notice": {
+      "tick": 3,
+      "source_request": "first-delay",
+      "withdrawal_by_recipient": {"household:0001": 6},
+      "react_to_verified_delay": true
+    },
+    "operations": [
+      {"tick": 1, "operation_id": "cash-deposit", "kind": "deposit",
+       "bank": "bank:b", "actor": "household:0001", "amount_minor": 10},
+      {"tick": 1, "operation_id": "interbank", "kind": "approve",
+       "bank": "bank:b", "actor": "bank:a", "amount_minor": 10, "installments": 1,
+       "payment_interval": 2, "default_after_misses": 1},
+      {"tick": 1, "operation_id": "household-credit", "kind": "approve",
+       "bank": "bank:b", "actor": "household:0000", "amount_minor": 20,
+       "installments": 1, "payment_interval": 3},
+      {"tick": 2, "operation_id": "cross-bank", "kind": "payment",
+       "bank": "bank:b", "actor": "bank:a", "target_bank": "bank:a",
+       "target_actor": "household:0002", "amount_minor": 10},
+      {"tick": 2, "operation_id": "initial-cash-demand", "kind": "withdraw",
+       "bank": "bank:a", "actor": "household:0002", "amount_minor": 10, "expires_tick": 2},
+      {"tick": 2, "operation_id": "first-delay", "kind": "withdraw",
+       "bank": "bank:b", "actor": "household:0000", "amount_minor": 12, "expires_tick": 5},
+      {"tick": 5, "operation_id": "interbank-legal-release", "kind": "release", "loan_id": "interbank"},
+      {"tick": 5, "operation_id": "bank-resolution", "kind": "resolve", "bank": "bank:b"}
+    ]
+  }
+}

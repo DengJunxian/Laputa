@@ -1,0 +1,28 @@
+{
+  "version": "ecosim.cooperation-choice-calibration.v1",
+  "dataset": {
+    "id": "zhu-2026-zenodo-19544006-v1",
+    "doi": "10.5281/zenodo.19544006",
+    "source": "https://zenodo.org/api/records/19544006/files/individual_data.csv/content",
+    "metadata": "https://zenodo.org/api/records/19544006",
+    "license": "CC-BY-4.0",
+    "sha256": "b37fa71434dd46249a0e7f43f9b9e798b1d3cafcffea3c80bc6997b99b6dd0a5",
+    "bytes": 720707,
+    "provenance": "Zeyu Zhu (2026), reanalysis of Nishi et al. network public-goods experiment. CSV retains anonymized nodes, not participant demographics or survey weights."
+  },
+  "split_namespace": "ecosim/rp06/empirical/split/v1",
+  "split_groups_per_visibility": [24, 8, 8],
+  "outcome": "whether the actor cooperated in an observed round 2–10, given a recorded own choice in the preceding round",
+  "unit": "one node/round transition, with equal weight per session when comparing predictive risk",
+  "candidates": ["constant", "own_previous", "own_previous_and_lag_offer"],
+  "selection": "lowest development session-mean Brier, tie in registered order; fit calibration groups only",
+  "evaluation": "session-mean Brier vs constant, secondary log loss, calibration-in-the-large and per-session counts. Percentile bootstrap of the 16 held-out session-level loss differences.",
+  "missing": "retain count of all node/round rows; current or preceding missing action cannot become a defection",
+  "synthetic_recovery": {
+    "replicates": 24,
+    "rows_per_replicate": 6000,
+    "first_seed": 570001,
+    "parameters": [-0.35, 1.2, 0.55],
+    "maximum_rmse": 0.12
+  }
+}

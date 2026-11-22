@@ -1,0 +1,51 @@
+{
+  "ticks": 5,
+  "households": 4,
+  "root_seed": 7,
+  "fault_tick": null,
+  "archive_observations": true,
+  "fiscal": {
+    "initial_cash_minor": 12,
+    "announced_tick": 3,
+    "effective_tick": 4,
+    "audience": [3],
+    "disclosure_cost_minor": 2,
+    "brackets": [{"start_minor": 0, "rate_bps": 0}],
+    "transfer_recipients": [3],
+    "transfer_minor": 1
+  },
+  "banking": {
+    "credit_creation_mode": "bank_credit_creation",
+    "initial_bank_cash": {"bank:a": 2, "bank:b": 3},
+    "run_notice": {
+      "tick": 3,
+      "source_request": "first-delay",
+      "withdrawal_by_recipient": {"household:0002": 2, "household:0001": 6},
+      "react_to_verified_delay": true,
+      "response_mode": "actor",
+      "disclosure_funding": {
+        "cost_per_recipient_minor": 3,
+        "budget_cap_minor": 6,
+        "authorized_through_tick": 3
+      }
+    },
+    "operations": [
+      {"tick": 1, "operation_id": "opening-deposit", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0001", "amount_minor": 9},
+      {"tick": 1, "operation_id": "second-opening-deposit", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0002", "amount_minor": 3},
+      {"tick": 1, "operation_id": "household-credit", "kind": "approve",
+       "bank": "bank:a", "actor": "household:0000", "amount_minor": 20, "installments": 1,
+       "payment_interval": 4},
+      {"tick": 2, "operation_id": "cross-bank", "kind": "payment",
+       "bank": "bank:a", "actor": "household:0001", "target_bank": "bank:b",
+       "target_actor": "household:0002", "amount_minor": 1},
+      {"tick": 2, "operation_id": "first-delay", "kind": "withdraw",
+       "bank": "bank:a", "actor": "household:0000", "amount_minor": 15, "expires_tick": 5},
+      {"tick": 4, "operation_id": "cash-inflow", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0002", "amount_minor": 5},
+      {"tick": 5, "operation_id": "second-cash-inflow", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0002", "amount_minor": 2}
+    ]
+  }
+}

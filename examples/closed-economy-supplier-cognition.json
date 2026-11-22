@@ -1,0 +1,10 @@
+{
+  "households": 4,
+  "ticks": 4,
+  "supplier_cognition": {
+    "mode": "M",
+    "household_indices": [0],
+    "ticks": [2, 3],
+    "social_weight_bps": 2500
+  }
+}

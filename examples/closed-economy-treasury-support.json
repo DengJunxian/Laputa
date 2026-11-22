@@ -1,0 +1,44 @@
+{
+  "ticks": 5,
+  "households": 4,
+  "root_seed": 7,
+  "fault_tick": null,
+  "fiscal": {
+    "initial_cash_minor": 8,
+    "announced_tick": 1,
+    "effective_tick": 2,
+    "audience": [],
+    "brackets": [{"start_minor": 0, "rate_bps": 0}],
+    "transfer_recipients": []
+  },
+  "banking": {
+    "credit_creation_mode": "bank_credit_creation",
+    "initial_bank_cash": {"bank:a": 2, "bank:b": 3},
+    "guarantee_budget_minor": 1,
+    "treasury_support": {
+      "bank_id": "bank:a",
+      "amount_minor": 6,
+      "disbursement_tick": 3,
+      "maturity_tick": 4,
+      "guarantee_limit_minor": 1
+    },
+    "operations": [
+      {"tick": 1, "operation_id": "opening-deposit", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0001", "amount_minor": 9},
+      {"tick": 1, "operation_id": "second-opening-deposit", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0002", "amount_minor": 3},
+      {"tick": 1, "operation_id": "household-credit", "kind": "approve",
+       "bank": "bank:a", "actor": "household:0000", "amount_minor": 20, "installments": 1,
+       "payment_interval": 4},
+      {"tick": 2, "operation_id": "cross-bank", "kind": "payment",
+       "bank": "bank:a", "actor": "household:0001", "target_bank": "bank:b",
+       "target_actor": "household:0002", "amount_minor": 1},
+      {"tick": 2, "operation_id": "cash-demand", "kind": "withdraw",
+       "bank": "bank:a", "actor": "household:0000", "amount_minor": 15, "expires_tick": 3},
+      {"tick": 4, "operation_id": "maturity-inflow", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0002", "amount_minor": 1},
+      {"tick": 5, "operation_id": "late-inflow", "kind": "deposit",
+       "bank": "bank:a", "actor": "household:0002", "amount_minor": 1}
+    ]
+  }
+}

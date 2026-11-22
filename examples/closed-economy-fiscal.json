@@ -1,0 +1,17 @@
+{
+  "ticks": 4,
+  "households": 4,
+  "root_seed": 7,
+  "fault_tick": null,
+  "fiscal": {
+    "initial_cash_minor": 24,
+    "announced_tick": 1,
+    "effective_tick": 2,
+    "audience": [0, 1],
+    "disclosure_cost_minor": 3,
+    "brackets": [{"start_minor": 0, "rate_bps": 2500}],
+    "transfer_recipients": [0, 1],
+    "transfer_minor": 4,
+    "precautionary_bps": 10000
+  }
+}

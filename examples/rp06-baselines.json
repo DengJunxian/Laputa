@@ -1,0 +1,27 @@
+{
+  "version": "ecosim.rp06.common-cooperation-offer.v1",
+  "seeds": [340001, 340002, 340003, 340004, 340005, 340006, 340007, 340008],
+  "config": {
+    "ticks": 5,
+    "households": 4,
+    "firms": 2,
+    "fault_tick": null,
+    "cooperation": {
+      "offer_tick": 1,
+      "household_indices": [0, 1],
+      "actions": ["cooperate", "defect"],
+      "followup": {"offer_tick": 4, "use_partner_result": true}
+    }
+  },
+  "primary_measure": "period-4 cooperative choices over both funded seats, with period-5 journal verification",
+  "baselines": {
+    "B1": "uniform addressed draw from cooperate, defect, decline before execution, no redraw",
+    "B2": "fixed full contribution",
+    "B3": "one-shot monetary best reply, defect with participation tie-break",
+    "B4": "conditional cooperation from the actor's settled private counterpart outcome",
+    "B5": "NOT_RUN: no common multi-round cooperation LLM with social channel ablation",
+    "B6": "NOT_RUN: no common cooperation LLM comparative static/dynamic network pair",
+    "B7": "NOT_RUN: one-slot synthetic/archive path does not isolate memory within the repeated cooperation model",
+    "B8": "NOT_RUN: same-model repeated cooperation policy with retrieval, reflection and dynamic network not available"
+  }
+}

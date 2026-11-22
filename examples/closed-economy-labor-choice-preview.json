@@ -1,0 +1,16 @@
+{
+  "root_seed": 7,
+  "ticks": 8,
+  "households": 8,
+  "firms": 2,
+  "archive_observations": true,
+  "fault_tick": null,
+  "labor_transfer": {
+    "worker_index": 1,
+    "additional_candidate_indices": [3, 5],
+    "employer_index": 0,
+    "offer_tick": 4,
+    "duration_ticks": 2,
+    "min_previous_sales_units": 1
+  }
+}

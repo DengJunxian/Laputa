@@ -1,0 +1,157 @@
+{
+  "ticks": 100,
+  "households": 1000,
+  "firms": 40,
+  "root_seed": 711101,
+  "social_mode": "static",
+  "fault_tick": null,
+  "archive_observations": true,
+  "initial_household_cash_minor": 38,
+  "cash_jitter_minor": 10,
+  "initial_firm_cash_minor": 5000,
+  "initial_price_minor": 8,
+  "firm_price_gap_minor": 0,
+  "min_price_minor": 8,
+  "max_price_minor": 8,
+  "fiscal": {
+    "initial_cash_minor": 18,
+    "announced_tick": 1,
+    "effective_tick": 2,
+    "audience": [
+      3
+    ],
+    "disclosure_cost_minor": 2,
+    "brackets": [
+      {
+        "start_minor": 0,
+        "rate_bps": 2000
+      }
+    ],
+    "transfer_recipients": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "transfer_minor": 1
+  },
+  "banking": {
+    "credit_creation_mode": "bank_credit_creation",
+    "initial_bank_cash": {
+      "bank:a": 120,
+      "bank:b": 120,
+      "bank:c": 120,
+      "bank:d": 120
+    },
+    "operations": [
+      {
+        "tick": 1,
+        "operation_id": "opening-0",
+        "kind": "deposit",
+        "bank": "bank:a",
+        "actor": "household:0000",
+        "amount_minor": 20
+      },
+      {
+        "tick": 1,
+        "operation_id": "credit-0",
+        "kind": "approve",
+        "bank": "bank:a",
+        "actor": "household:0004",
+        "amount_minor": 10,
+        "installments": 1
+      },
+      {
+        "tick": 2,
+        "operation_id": "cross-0",
+        "kind": "payment",
+        "bank": "bank:a",
+        "actor": "household:0000",
+        "target_bank": "bank:b",
+        "target_actor": "household:0004",
+        "amount_minor": 3
+      },
+      {
+        "tick": 1,
+        "operation_id": "opening-1",
+        "kind": "deposit",
+        "bank": "bank:b",
+        "actor": "household:0001",
+        "amount_minor": 20
+      },
+      {
+        "tick": 1,
+        "operation_id": "credit-1",
+        "kind": "approve",
+        "bank": "bank:b",
+        "actor": "household:0005",
+        "amount_minor": 10,
+        "installments": 1
+      },
+      {
+        "tick": 2,
+        "operation_id": "cross-1",
+        "kind": "payment",
+        "bank": "bank:b",
+        "actor": "household:0001",
+        "target_bank": "bank:c",
+        "target_actor": "household:0005",
+        "amount_minor": 3
+      },
+      {
+        "tick": 1,
+        "operation_id": "opening-2",
+        "kind": "deposit",
+        "bank": "bank:c",
+        "actor": "household:0002",
+        "amount_minor": 20
+      },
+      {
+        "tick": 1,
+        "operation_id": "credit-2",
+        "kind": "approve",
+        "bank": "bank:c",
+        "actor": "household:0006",
+        "amount_minor": 10,
+        "installments": 1
+      },
+      {
+        "tick": 2,
+        "operation_id": "cross-2",
+        "kind": "payment",
+        "bank": "bank:c",
+        "actor": "household:0002",
+        "target_bank": "bank:d",
+        "target_actor": "household:0006",
+        "amount_minor": 3
+      },
+      {
+        "tick": 1,
+        "operation_id": "opening-3",
+        "kind": "deposit",
+        "bank": "bank:d",
+        "actor": "household:0003",
+        "amount_minor": 20
+      },
+      {
+        "tick": 1,
+        "operation_id": "credit-3",
+        "kind": "approve",
+        "bank": "bank:d",
+        "actor": "household:0007",
+        "amount_minor": 10,
+        "installments": 1
+      },
+      {
+        "tick": 2,
+        "operation_id": "cross-3",
+        "kind": "payment",
+        "bank": "bank:d",
+        "actor": "household:0003",
+        "target_bank": "bank:a",
+        "target_actor": "household:0007",
+        "amount_minor": 3
+      }
+    ]
+  }
+}

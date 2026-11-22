@@ -1,0 +1,7 @@
+# Third-party notices
+
+- `civitas/scenarios/closed_economy_rules.py` adapts the household action capabilities and shopping budget of EconSimulacra and the integer work-to-output calculation of Manyworld. The source headers credit SimulacraBusiness and Agent Economy contributors. The original MIT copyright, permission and disclaimer texts are retained. [EconSimulacra, aa1302ed](https://github.com/SimulacraBusiness/econsimulacra/tree/aa1302ed9908e487008cdf999ee8607694bddc83) · [Manyworld, ed20ff4](https://github.com/alinojoumi8/manyworld/tree/ed20ff4395581a5b4257d3fbd6b7cc971f97c318)
+- `civitas/economy/fiscal.py` adapts bracket clipping from `PeriodicBracketTax.taxes_due` in the Salesforce AI Economist to integer minor units. The BSD-3-Clause notice, conditions, disclaimer and non-endorsement clause are retained. [AI Economist, a84d5f3](https://github.com/salesforce/ai-economist/tree/a84d5f3fdcabb207d9fde7754d34906903b3e184)
+- `civitas/population/fit.py` calls the NumPy method of the optional `ipfn==1.4.4` distribution. The installed algorithm was checked against `fa57b905`. The MIT notice is retained alongside the other source notices. The dependency is installed separately. [ipfn, fa57b905](https://github.com/Dirguis/ipfn/tree/fa57b905291e4125c6e4f7ddacc8770218ad024e)
+
+[Original license texts](docs/batch4/licenses/) travel with source distributions and locally built wheels. Python dependencies are resolved through their package distributions and carry their own terms.

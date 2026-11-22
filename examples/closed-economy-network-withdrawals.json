@@ -1,0 +1,11 @@
+{
+  "ticks": 10,
+  "households": 8,
+  "network_neighbors": 2,
+  "root_seed": 7,
+  "fault_tick": null,
+  "social_mode": "static",
+  "introductions": true,
+  "link_budget_per_tick": 1,
+  "link_withdrawal_tick": 6
+}

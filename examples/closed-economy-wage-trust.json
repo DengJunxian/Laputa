@@ -1,0 +1,23 @@
+{
+  "ticks": 7,
+  "households": 4,
+  "network_neighbors": 1,
+  "root_seed": 7,
+  "initial_household_cash_minor": 15,
+  "initial_firm_cash_minor": 130,
+  "initial_price_minor": 12,
+  "wage_minor": 24,
+  "output_per_worker": 2,
+  "fault_tick": null,
+  "target_units_min": 1,
+  "target_units_max": 1,
+  "labor_transfer": {
+    "worker_index": 1,
+    "employer_index": 0,
+    "offer_tick": 2,
+    "duration_ticks": 3,
+    "min_previous_sales_units": 1,
+    "outcome_evidence": true,
+    "performance_trust": true
+  }
+}

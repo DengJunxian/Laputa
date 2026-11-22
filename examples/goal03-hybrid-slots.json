@@ -1,0 +1,24 @@
+{
+  "cooperation": {
+    "offer_tick": 2,
+    "household_indices": [0, 2],
+    "actions": ["cooperate", "cooperate"],
+    "followup": {"offer_tick": 4, "use_partner_result": true}
+  },
+  "labor_transfer": {
+    "worker_index": 1,
+    "additional_candidate_indices": [3, 5],
+    "employer_index": 0,
+    "offer_tick": 2,
+    "min_previous_sales_units": 1,
+    "duration_ticks": 2
+  },
+  "supplier_cognition": {
+    "household_indices": [5], "ticks": [3], "mode": "L", "reflect": false,
+    "retrieve_memory": false, "source": "synthetic_test"
+  },
+  "labor_cognition": {"household_index": 3, "source": "synthetic_test"},
+  "withdrawal_cognition": {"household_index": 1, "source": "synthetic_test"},
+  "cooperation_cognition": {"household_index": 0, "source": "synthetic_test"},
+  "disclosure_cognition": {"household_index": 0, "tick": 2, "source": "synthetic_test"}
+}

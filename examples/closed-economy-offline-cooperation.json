@@ -1,0 +1,17 @@
+{
+  "ticks": 4,
+  "households": 4,
+  "fault_tick": null,
+  "cooperation": {
+    "offer_tick": 2,
+    "household_indices": [
+      0,
+      1
+    ],
+    "actions": [
+      "cooperate",
+      "cooperate"
+    ]
+  },
+  "offline_cooperation_action": "defect"
+}

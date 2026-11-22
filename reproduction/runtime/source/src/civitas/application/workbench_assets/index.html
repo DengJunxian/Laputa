@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>EcoSim 研究工作台</title>
+  <link rel="stylesheet" href="/workbench.css">
+  <script defer src="/workbench.js"></script>
+</head>
+<body>
+<header class="top"><div><span class="brand">EcoSim</span><span class="title">研究工作台</span></div><span id="scope"></span></header>
+<nav id="preview-nav" aria-label="研究预览" hidden>
+  <a href="/">联合世界</a><a href="/labor/">岗位对照</a><a href="/withdrawal/">提款对照</a>
+</nav>
+<main id="layout">
+  <aside id="researcher" hidden aria-label="运行管理">
+    <h1>运行</h1>
+    <nav id="jobs" aria-label="运行列表"></nav>
+    <details id="intervention-templates" hidden>
+      <summary>冻结干预实验</summary>
+      <label>干预模板<select id="template-kind"></select></label>
+      <label>处理臂<select id="template-arm"><option value="control">对照</option><option value="treatment">干预</option></select></label>
+      <p id="template-window" class="mono"></p>
+      <button id="template-freeze" class="primary">冻结处理臂</button>
+    </details>
+    <details id="configure" open>
+      <summary>配置新运行</summary>
+      <label>运行名称<input id="run-label" value="联合世界" maxlength="80"></label>
+      <label>世界配置（JSON）<textarea id="config" rows="11" spellcheck="false"></textarea></label>
+      <div class="actions"><button id="validate">校验</button><button id="freeze" class="primary">冻结配置</button></div>
+    </details>
+  </aside>
+  <section class="workspace" aria-label="运行与观察">
+    <p id="message" class="notice" role="status" aria-live="polite"></p>
+    <p id="empty" hidden>先校验并冻结一个世界配置。</p>
+    <section id="registration-panel" aria-labelledby="registration-title" hidden>
+      <div class="run-heading"><h1 id="registration-title"></h1><span id="registration-phase" class="state" role="status"></span></div>
+      <p id="registration-window"></p>
+      <details>
+        <summary>核对两臂配置</summary>
+        <p id="registration-plan" class="mono"></p>
+        <pre id="registration-config" tabindex="0" aria-label="两臂配置 JSON"></pre>
+      </details>
+      <div class="actions">
+        <button id="registration-register" class="primary" disabled>登记配置</button>
+        <button id="registration-start" class="primary" disabled>启动两臂</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th scope="col">处理臂</th><th scope="col">执行状态</th><th scope="col">最新提交期次</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">规则</th><td id="registration-rule-state"></td><td id="registration-rule-cursor"></td></tr>
+            <tr><th scope="row">固定合成归档</th><td id="registration-archive-state"></td><td id="registration-archive-cursor"></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p id="registration-denominators"></p>
+      <p id="registration-failure" class="notice error" role="status"></p>
+    </section>
+    <section id="choice-panel" aria-labelledby="choice-title" hidden>
+      <div class="run-heading"><h1 id="choice-title">冻结对照</h1></div>
+      <div class="toolbar">
+        <label>实验<select id="choice-kind"></select></label>
+        <label>期次<select id="choice-tick"></select></label>
+        <button id="choice-download" class="primary" disabled>导出完整对照</button>
+      </div>
+      <p id="choice-status" class="notice" role="status"></p>
+      <div id="choice-result"></div>
+      <details id="choice-access">
+        <summary>登记主体只读视图</summary>
+        <div class="toolbar">
+          <label>处理臂<select id="choice-arm"><option value="rule">规则</option><option value="archive">固定合成归档</option></select></label>
+          <button id="choice-grant" disabled>生成只读链接</button>
+        </div>
+        <a id="choice-link" target="_blank" rel="noopener noreferrer" hidden>打开主体只读视图</a>
+      </details>
+    </section>
+    <section id="run" hidden>
+      <div class="run-heading"><div><h1 id="run-title"></h1><p id="cursor" class="mono"></p></div><span id="state" class="state"></span></div>
+      <div id="controls" class="control" hidden>
+        <label>运行至（期）<input id="until" type="number" min="0" placeholder="冻结终点"></label>
+        <div class="actions"><button id="start" class="primary">启动</button><button id="pause">期界暂停</button><button id="resume">恢复</button><button id="cancel" class="danger">取消运行</button></div>
+      </div>
+      <details id="fork" hidden>
+        <summary>从提交派生分支</summary>
+        <div class="fields">
+          <label>父提交期次<input id="fork-tick" type="number" min="0"></label>
+          <label>分支名称<input id="fork-label" value="缩时臂" maxlength="80"></label>
+          <label>干预<select id="intervention"><option value="none">沿用父规则</option><option value="shift">下一期缩时</option></select></label>
+          <div id="shift-fields" class="fields" hidden>
+            <label>目标住户索引<input id="workers" value="0,1"></label>
+            <label>工时（分钟）<input id="minutes" type="number" min="1" max="479" value="240"></label>
+          </div>
+        </div>
+        <div class="actions"><button id="fork-freeze" class="primary">冻结分支</button></div>
+      </details>
+      <section id="inspect" class="inspection" aria-labelledby="inspect-title">
+        <h2 id="inspect-title">提交检查</h2>
+        <div class="toolbar">
+          <label>查看期次<input id="tick" type="number" min="0" step="1"></label>
+          <label id="actor-label">观察范围<select id="actor"><option value="">研究者</option></select></label>
+          <label id="compare-label">对照运行<select id="compare"><option value="">无</option></select></label>
+          <button id="read-view" class="primary">查看提交</button>
+          <button id="download" disabled>导出 JSON</button>
+          <button id="grant" hidden>生成主体只读链接</button>
+        </div>
+        <a id="observer-link" target="_blank" rel="noopener noreferrer" hidden>打开主体只读视图</a>
+        <p id="view-status" class="notice" role="status"></p>
+        <div id="result"></div>
+      </section>
+    </section>
+  </section>
+</main>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "households": 4,
+  "firms": 2,
+  "ticks": 5,
+  "root_seed": 7,
+  "fault_tick": null,
+  "archive_observations": true,
+  "banking": {
+    "credit_creation_mode": "bank_credit_creation",
+    "initial_bank_cash": {"bank:a": 9, "bank:b": 3},
+    "credit_offer": {
+      "kind": "approve", "operation_id": "resident-credit", "tick": 2,
+      "bank": "bank:a", "actor": "household:0000", "amount_minor": 12, "installments": 2
+    }
+  },
+  "fiscal": {
+    "initial_cash_minor": 12, "announced_tick": 3, "effective_tick": 4,
+    "audience": [1], "disclosure_cost_minor": 1,
+    "brackets": [{"start_minor": 0, "rate_bps": 1000}],
+    "transfer_recipients": [1], "transfer_minor": 1
+  }
+}

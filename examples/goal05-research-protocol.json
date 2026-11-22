@@ -1,0 +1,48 @@
+{
+  "version": "ecosim.goal05.paired.v1",
+  "scene_spec": "wp10-scenarios.json",
+  "strategy_template": "closed-economy-labor-choice-preview.json",
+  "primary_family": ["A1", "D1"],
+  "unit": "independent addressed world root, with shared random addresses within each paired block",
+  "analysis": "one-sided paired-root t tests versus zero with two-sided 95% intervals, Holm family A1/D1. No test for failed verification, insufficient independent roots, zero variance, or technical/mechanism failure. Precision and test decision reported separately.",
+  "alpha": 0.05,
+  "power": 0.8,
+  "planning_confidence": 0.8,
+  "minimum_eligible_pilot_roots": 4,
+  "studies": {
+    "A1": {
+      "hypothesis": "Selective exposure increases the effect of herding on actual post-shock maximum drawdown",
+      "contrast": "S1H1 - S1H0 - S0H1 + S0H0",
+      "metric": "drawdown from real trading closes, starting at last pre-shock close",
+      "window": "shock through final period",
+      "missing": "no close is undefined; unfunded boundary retained outside the primary family",
+      "pilot_roots": [510001, 510008],
+      "confirmation_pool": [511001, 511032],
+      "important_effect": 0.006,
+      "ci_halfwidth_target": 0.006,
+      "planning_sd_floor": 0.006,
+      "allocation_block": 1,
+      "minimum_allocated": 8
+    },
+    "D1": {
+      "hypothesis": "Cumulative trust and selective network exchange interact positively on eligible late cooperation",
+      "contrast": "t1r1 - t1r0 - t0r1 + t0r0",
+      "metric": "cooperative choices per offered late seat in matched shared risk sets",
+      "window": "period 20 choice, period 21 settlement",
+      "missing": "natural pre-offer stops stay allocated, are absent from the eligible estimand, and contribute zero to assigned-seat cooperation. Retain at-risk no-offers and failures separately.",
+      "pilot_roots": [520001, 520012],
+      "confirmation_pool": [521001, 521032],
+      "important_effect": 0.25,
+      "ci_halfwidth_target": 0.17,
+      "planning_sd_floor": 0.25,
+      "allocation_block": 4,
+      "minimum_allocated": 12
+    }
+  },
+  "strategy": {
+    "pilot_roots": [530001, 530004],
+    "confirmation_roots": [531001, 531008],
+    "scope": "one directed eligible seat replaces rule application with the fixed synthetic archived wait; paired signed difference in actual wages from the registered new contract",
+    "analysis": "descriptive, outside primary tests; all-source follow-up wages separate"
+  }
+}

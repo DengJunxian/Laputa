@@ -1,0 +1,100 @@
+{
+  "schema_version": 11,
+  "base_config": {
+    "ticks": 15,
+    "households": 9,
+    "network_neighbors": 2,
+    "root_seed": 7,
+    "fault_tick": null,
+    "initial_price_minor": 6,
+    "firm_price_gap_minor": 0,
+    "target_units_min": 1,
+    "target_units_max": 1,
+    "labor_transfer": {
+      "worker_index": 1,
+      "employer_index": 0,
+      "offer_tick": 2,
+      "duration_ticks": 2,
+      "min_previous_sales_units": 1,
+      "outcome_evidence": true,
+      "performance_trust": true,
+      "rehire": {
+        "offer_tick": 6,
+        "minimum_trust_bps": 8000,
+        "alternative_employer_index": 1,
+        "switch_fee_minor": 3
+      },
+      "second_rehire": {
+        "offer_tick": 9,
+        "alternative_employer_index": 1,
+        "switch_fee_minor": 3,
+        "additional_alternative_employer_index": 2
+      }
+    },
+    "firms": 3,
+    "stopping_hazard_bps": 1250,
+    "cooperation": {
+      "offer_tick": 9,
+      "household_indices": [
+        1,
+        2
+      ],
+      "actions": [
+        "cooperate",
+        "cooperate"
+      ],
+      "followup": {
+        "offer_tick": 14,
+        "use_partner_result": false,
+        "partner_choice": {
+          "alternate_index": 5,
+          "fee_minor": 3,
+          "random_choice": false,
+          "trust_ranking": {
+            "enabled": true,
+            "trials": [
+              {
+                "offer_tick": 1,
+                "alternate_index": 5,
+                "action": "cooperate"
+              },
+              {
+                "offer_tick": 3,
+                "alternate_index": 7,
+                "action": "defect"
+              },
+              {
+                "offer_tick": 5,
+                "alternate_index": 5,
+                "action": "cooperate"
+              },
+              {
+                "offer_tick": 7,
+                "alternate_index": 7,
+                "action": "defect"
+              },
+              {
+                "offer_tick": 9,
+                "alternate_index": 5,
+                "action": "defect"
+              },
+              {
+                "offer_tick": 11,
+                "alternate_index": 7,
+                "action": "cooperate"
+              }
+            ]
+          }
+        },
+        "partner_outcome_rule": "recent"
+      }
+    },
+    "link_budget_per_tick": 1
+  },
+  "seeds": [
+    509,
+    534,
+    659,
+    513
+  ]
+}

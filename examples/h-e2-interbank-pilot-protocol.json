@@ -1,0 +1,23 @@
+{
+  "scenario": "closed-economy-interbank-resolution.json",
+  "mechanism_root": 710041,
+  "pilot_roots": [710043, 710047, 710051, 710057],
+  "through": 8,
+  "unit": "independent root block, all four policy assignments retained",
+  "dose_minor": {"disclosure": 6, "advance": 9},
+  "credit_stress_minor": 240,
+  "endpoint": "terminal booked deposit loss through tick 8 / full-system deposit claims at tick 2",
+  "undefined_if": ["no baseline claims", "unresolved receivership deposit claims at cutoff", "no verified cutoff state"],
+  "secondary_outcomes": ["deposit intake", "disbursement and collection", "interbank maturity postings", "withdrawals paid", "claimant payouts and losses"],
+  "planning": {
+    "minimum_relevant_absolute_interaction": 0.02,
+    "target_two_sided_interval_half_width": 0.01,
+    "alpha": 0.05,
+    "power": 0.8,
+    "minimum_root_blocks": 8,
+    "sensitivity_sd": [0.01, 0.02, 0.04],
+    "sample_formula": "max(minimum_root_blocks, ceil((z_critical * s / half_width)^2), ceil(((z_critical + z_power) * s / minimum_relevant_absolute_interaction)^2))",
+    "zero_or_undefined_pilot_sd": "no pilot-based confirmation sample; run a separate feasibility design varying actual financial exposure",
+    "confirmation_test": null
+  }
+}

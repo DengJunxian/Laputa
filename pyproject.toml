@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools==84.2.1", "wheel==0.48.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ecosim-research"
+version = "0.4.0.dev1"
+description = "Reproducible social-economic simulation with a versioned transactional core"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = ["pydantic==2.13.4", "PyYAML==6.0.3"]
+license-files = ["THIRD_PARTY_NOTICES.md", "docs/batch4/licenses/*.txt"]
+
+[project.scripts]
+ecosim = "civitas.cli_v4:main"
+
+[project.optional-dependencies]
+data = ["pyarrow==26.0.1"]
+llm = ["openai==2.26.0"]
+population = ["ipfn==1.4.4", "numpy==2.3.5", "pandas==2.2.3"]
+research = ["numpy==2.3.5", "pandas==2.2.3", "scipy==1.18.1", "statsmodels==0.15.0"]
+
+[tool.setuptools]
+include-package-data = true
+py-modules = ["config"]
+
+[tool.setuptools.package-data]
+civitas = ["application/workbench_assets/*.html", "application/workbench_assets/*.js", "application/workbench_assets/*.css"]
+
+[tool.setuptools.package-dir]
+"" = "reproduction/runtime/source"
+civitas = "reproduction/runtime/source/src/civitas"
+core = "reproduction/runtime/source/core"
+
+[tool.setuptools.packages.find]
+where = ["reproduction/runtime/source/src", "reproduction/runtime/source"]
+include = ["civitas*", "core*"]
+namespaces = false

@@ -1,0 +1,8 @@
+{
+  "ticks": 6,
+  "households": 6,
+  "network_neighbors": 2,
+  "root_seed": 7,
+  "fault_tick": null,
+  "introductions": true
+}
