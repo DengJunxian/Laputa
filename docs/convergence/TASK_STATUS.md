@@ -7,5 +7,5 @@
 | 03 Agent 策略 | P1 | PASS | [三臂对照、记忆、预算与回放](STAGE_03.md) | 真实付费模型 E2E 为 NOT_EXECUTED。 |
 | 04 PPT 机制 | P1 | PASS | [M1 登记、消融及阴性结果](STAGE_04.md) | 本阶段完成。 |
 | 05 实验 | P1 | PASS | [冻结协议、8 根 32 世界与四臂回放](STAGE_05.md) | pilot 推断为 INCONCLUSIVE。本阶段完成。 |
-| 06 Workbench/CI | P1 | NOT_STARTED | 现有 Workbench 与本地项目安装 | 等待用户指示。 |
-| 07 终验 | P1 | NOT_STARTED | 独立执行与可检查证据 | 06 通过后按阶段提示词启动。 |
+| 06 Workbench/CI | P1 | PASS_LOCAL · HOSTED_CI_PENDING | [浏览器、wheel、CI 本地步骤和性能粗测](STAGE_06.md) | 托管 CI 待工作流进入远端。 |
+| 07 终验 | P1 | NOT_STARTED | 独立执行与可检查证据 | 等待用户指示。 |
