@@ -1,6 +1,6 @@
 # SCOPE_LOCK / Laputa MCRP
 
-**Stage 04 base** `dae266ca5e6d47613b40ba08b0d75c533582d9c4` · **Current stage** 04 · **Branch** `feature/laputa-convergence`
+**Stage 05 base** `b4a29ae16b54b5590e5cbb9ffa185ab9fda59d8c` · **Current stage** 05 · **Branch** `feature/laputa-convergence`
 
 **One target behavior**
 
@@ -30,6 +30,6 @@
 
 [积压项](BACKLOG.md) 为 LATER。本轮范围包括本地提交；远端推送、公开发布、修改许可和付费模型调用需另行授权。
 
-**Stage 04 slice** · 只做 PPT 第 1 页对应的 M1。保留阶段 02 的 root 7、5 期、证券标价冲击 90 和人口。预先固定两组对照，`lambda_bps=10000` 对 `20000` 均开启披露，`20000` 再配对关闭披露。加权损失进入原有预算，披露只复用既有消费回执与通信。核对可见时序、去重、法定债权、实际行动和独立回放，保留零差异。
+**Stage 05 slice** · 在冻结的阶段 02–04 联合配置上运行 8 根、4 臂的规则 pilot。固定主终点为第 3 期实际消费，比较价格冲击与权重的交互，审计权重臂观察量和内容相同。保留缺成交、无触发、失败与零差异，首根四臂均做 checkpoint、续跑和独立执行回放。只审计现有公共品数据的适用范围。
 
-**Result** · PASS，见 [阶段 04 机制与对照](STAGE_04.md)。
+**Result** · 见 [阶段状态](TASK_STATUS.md)。

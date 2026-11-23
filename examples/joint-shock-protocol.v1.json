@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "protocol_id": "laputa.joint-shock-pilot.v1",
+  "question": "In the fixed synthetic joint economy, does doubling the loss-side reserve response alter the effect of a security mark shock on goods consumption at the first affected decision period?",
+  "base_fixture": "examples/closed-economy-security-feedback.json",
+  "base_fixture_sha256": "09b990fd8ef3ffcd45287e82bf2582033cd8ff5ecd4eea8d1e1943a2485abb04",
+  "root_sampling": "First eight primes greater than 100, declared before execution. Each root is a distinct AddressedRNG world replication on the same registered population and network.",
+  "roots": [101, 103, 107, 109, 113, 127, 131, 137],
+  "replica": 0,
+  "clock": {
+    "unit": "synthetic settlement period",
+    "warmup_ticks": [1],
+    "mark_tick": 2,
+    "primary_tick": 3,
+    "trace_ticks": [1, 2, 3, 4, 5],
+    "terminal_tick": 5
+  },
+  "arm_settings": {
+    "flat_linear": {"shock_enabled": false, "lambda_bps": 10000},
+    "flat_weighted": {"shock_enabled": false, "lambda_bps": 20000},
+    "shock_linear": {"shock_enabled": true, "lambda_bps": 10000},
+    "shock_weighted": {"shock_enabled": true, "lambda_bps": 20000}
+  },
+  "frozen_variables": {
+    "households": 8,
+    "firms": 2,
+    "banks": 2,
+    "security_asset": "security:A",
+    "initial_price_minor": 100,
+    "shock_drop_minor": 90,
+    "conditional_transfer_floor_units": 13,
+    "wealth_observed": true,
+    "peer_disclosure": true,
+    "data_origin": "synthetic"
+  },
+  "primary_endpoint": {
+    "id": "settled_consumption_units_tick_3",
+    "definition": "Sum of goods units removed by successful consumption settlements in period 3 across all eight registered households. Households without settlement contribute zero.",
+    "range": [0, 24],
+    "source": "Consumption journal transactions matched to receipts and the committed period aggregate."
+  },
+  "analysis": {
+    "version": "joint-shock-factorial-v1",
+    "primary_contrast": "shock_by_weight",
+    "contrast_weights": {
+      "shock_by_weight": {"shock_weighted": 1, "shock_linear": -1, "flat_weighted": -1, "flat_linear": 1},
+      "shock_at_linear": {"shock_linear": 1, "flat_linear": -1},
+      "shock_at_weighted": {"shock_weighted": 1, "flat_weighted": -1},
+      "weight_under_shock": {"shock_weighted": 1, "shock_linear": -1}
+    },
+    "unit": "one complete root with four paired worlds",
+    "diagnostics": "No p-values. Mean, sample SD, MCSE and two-sided nominal 95% Student t interval across eligible roots. Interval unavailable for n < 2 or zero observed SD. Retain assigned denominators and reasons for ineligibility.",
+    "inference_status": "INCONCLUSIVE",
+    "purpose": "Feasibility and observed finite-sample variance only."
+  },
+  "information_matching": {
+    "policy_control": "Weight 1 uses exactly the same observation channel as weight 2. Peer disclosure and its attention limit remain active in all arms.",
+    "primary_gate": "Require exact period-3 observation equality within each same-mark weight pair and equal observation counts by actor and channel across all arms. The predecision wealth fact value is the intended price intervention.",
+    "later_periods": "Realized disclosures and resulting information counts can be outcomes after period 3. Report them with denominators. Use the first-barrier information-matched contrast for inference."
+  },
+  "missingness": {
+    "realized_returns": "Use adjacent realized security closes only. Null if either close is missing. A synthetic mark and the opening reference price cannot supply a realized close.",
+    "terminal": "Retain failed, not started, audit failed, or natural stop assignments. Use completed roots satisfying frozen pairing and manipulation checks. No replacement or additional seeds.",
+    "institutional_response": "A recorded fiscal zero or nontriggered response remains an outcome."
+  },
+  "budget": {
+    "mode": "rule",
+    "maximum_roots": 8,
+    "maximum_worlds": 32,
+    "maximum_world_ticks": 160,
+    "maximum_external_api_calls": 0,
+    "maximum_monetary_model_cost_minor": 0,
+    "verification_root": 101,
+    "checkpoint_tick": 2,
+    "maximum_replay_ticks": 20
+  },
+  "risks": [
+    "Cash floors may make both weights choose the same action.",
+    "One prefunded security session leaves adjacent realized market returns unobserved.",
+    "Fixed topology, short horizon and eight addressed roots limit generalization.",
+    "Public-goods calibration covers observed cooperation transitions only. This pilot has no matching empirical data."
+  ]
+}
