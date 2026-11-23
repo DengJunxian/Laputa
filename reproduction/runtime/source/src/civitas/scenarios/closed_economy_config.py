@@ -190,6 +190,12 @@ class SecurityMarketSettings(Record):
         default=None, exclude_if=lambda value: value is None)
 
 
+class SecurityFeedbackSettings(Record):
+    holder_indices: list[NonNegative] = Field(min_length=1)
+    shock_enabled: bool = True
+    wealth_observed: bool = True
+
+
 class ConsumptionDemandSettings(Record):
     peer_uplift_units: Literal[0, 1] = 0
     hiring_adapts: bool = True
@@ -231,6 +237,7 @@ class ClosedEconomyConfig(Record):
     banking: BankingConfig | None = Field(default=None, exclude_if=lambda value: value is None)
     fiscal: FiscalPolicy | None = Field(default=None, exclude_if=lambda value: value is None)
     securities: SecurityMarketSettings | None = Field(default=None, exclude_if=lambda value: value is None)
+    security_feedback: SecurityFeedbackSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     demand: ConsumptionDemandSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     population_input: HouseholdPopulation | None = Field(default=None, exclude_if=lambda value: value is None)
     supplier_cognition: SupplierCognition | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -325,7 +332,20 @@ class ClosedEconomyConfig(Record):
     def compatible_configuration(self):
         if not self.archive_observations and self.observation_archive_format != "observe.v1":
             raise ValueError("An indexed observation format requires observation archiving")
-        if self.securities is not None:
+        if self.security_feedback is not None:
+            holders = self.security_feedback.holder_indices
+            security = self.securities
+            if (security is None or security.shock_tick != 2 or self.ticks < 5
+                    or security.initial_price_minor <= security.fundamental_drop_minor
+                    or not 8 <= self.households <= 16 or self.firms != 2
+                    or self.banking is None or len(self.banking.initial_bank_cash) != 2 or self.fiscal is None
+                    or any((self.demand, self.cooperation, self.population_input, self.labor_income_shock,
+                            self.stopping_hazard_bps))
+                    or self.cognition_mode != "rule"
+                    or len(set(holders)) != len(holders) or len(holders) >= self.households
+                    or max(holders) >= self.households):
+                raise ValueError("Security feedback requires the bounded offline joint economy and distinct household holders")
+        elif self.securities is not None:
             security = self.securities
             if (any((self.banking, self.fiscal, self.cooperation, self.labor_transfer, self.demand,
                      self.supplier_cognition, self.withdrawal_cognition, self.labor_cognition, self.credit_cognition,

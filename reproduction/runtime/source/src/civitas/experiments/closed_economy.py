@@ -14,6 +14,7 @@ import time
 from civitas.application.closed_economy import build_closed_economy
 from civitas.application.economic_run import current_implementation
 from civitas.contracts.base import content_hash
+from civitas.contracts.economic import SECURITY_ASSET
 from civitas.scenarios.closed_economy_config import ClosedEconomyConfig
 from civitas.storage.commit_store import atomic_json
 
@@ -45,6 +46,10 @@ def audit_snapshot(snapshot):
     if cash_initial != cash_final:
         raise AssertionError('Closed settlement-token total changed')
     goods = dict(state['initial_goods'])
+    positions = {state['good_id']: goods}
+    if 'security_units' in state:
+        positions[SECURITY_ASSET] = dict.fromkeys(goods, 0)
+    security_volume = 0
     flows = defaultdict(int)
     account_totals = defaultdict(int)
     transaction_groups = 0
@@ -58,15 +63,25 @@ def audit_snapshot(snapshot):
             raise AssertionError('A journal transaction does not balance by owner/currency')
         transaction_groups += len(balance)
         for movement in entry['goods_movements']:
-            if movement['kind'] == 'opening':
+            resource = movement['resource_id']
+            kind = movement['kind']
+            if resource == state['good_id'] and kind == 'opening':
                 continue  # The initial inventory is already in the oracle.
+            if resource not in positions or resource != state['good_id'] and kind not in ('opening', 'transfer'):
+                raise AssertionError('Journal movement has an unregistered resource or action')
+            holdings = positions[resource]
             quantity = movement['quantity_units']
             source, target = movement['from_owner'], movement['to_owner']
             if source is not None:
-                goods[source] -= quantity
+                holdings[source] -= quantity
+                if holdings[source] < 0:
+                    raise AssertionError('Journal movement exceeds owned resource units')
             if target is not None:
-                goods[target] += quantity
-            flows[movement['kind']] += quantity
+                holdings[target] += quantity
+            if resource == state['good_id']:
+                flows[kind] += quantity
+            elif kind == 'transfer':
+                security_volume += quantity
     if goods != dict(state['goods']) or any(value < 0 for value in goods.values()):
         raise AssertionError('Journal goods flows and recorded stock disagree')
     for actor, balance in state['balances'].items():
@@ -91,10 +106,22 @@ def audit_snapshot(snapshot):
                          ('scrap','scrapped_units')):
         if flows[kind] != sum(row[metric] for row in macro):
             raise AssertionError('Macro resource totals differ from journal movements')
+    security_summary = {}
+    if 'security_units' in state:
+        securities = positions[SECURITY_ASSET]
+        if securities != dict(state['security_units']):
+            raise AssertionError('Journal security movements and recorded positions disagree')
+        session = snapshot.data['closed_economy']['security_session']
+        if security_volume != (session['volume_units'] if session is not None else 0):
+            raise AssertionError('Joint security session volume differs from journal movements')
+        from civitas.scenarios.security_market import validate_security_receipts
+
+        validate_security_receipts(snapshot, mixed=True)
+        security_summary = {'security_final_units': sum(securities.values()), 'security_volume_units': security_volume}
     return {'cash_initial_minor':cash_initial, 'cash_final_minor':cash_final,
             'goods_final_units':sum(goods.values()), 'flows_units':dict(flows),
             'balanced_entity_currency_transactions':transaction_groups,
-            'status':'passed'}
+            'status':'passed', **security_summary}
 
 
 def summarize_world(world):

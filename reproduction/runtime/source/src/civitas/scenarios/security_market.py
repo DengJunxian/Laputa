@@ -1,7 +1,7 @@
 """A funded single-asset session on the same v4 economic participant."""
 from collections import defaultdict
 
-from civitas.contracts.economic import EconomicDecisionBundle, EconomicExecutionReceipt, SecurityOrderIntent
+from civitas.contracts.economic import EconomicDecisionBundle, EconomicExecutionReceipt, SecurityOrderIntent, SECURITY_ASSET
 from civitas.contracts.events import Event
 from civitas.contracts.observations import ObservationFact
 from civitas.contracts.portfolio import ReserveCommand
@@ -11,22 +11,25 @@ from civitas.markets.multiasset import MatchingVenue
 from civitas.resources.fixedpoint import notional
 from civitas.resources.ledger import LedgerReject
 
-ASSET = "security:A"
+ASSET = SECURITY_ASSET
 STATE = "security_market"
 SHOCK = "event:security:fundamental"
 SOURCE = "source:security:"
 SESSION_UNITS = 3
 
 
-def validate_security_receipts(snapshot):
+def validate_security_receipts(snapshot, *, mixed=False):
     entries = {entry["tx_id"]: entry for entry in snapshot.data["economic_runtime"]["journal"]
                if entry["kind"] == "security_trade"}
     orders = {f"command:{intent.intent_id}": (decision, intent)
-              for decision in snapshot.decisions for intent in decision.economic_intents}
+              for decision in snapshot.decisions for intent in decision.economic_intents
+              if not mixed or isinstance(intent, SecurityOrderIntent)}
+    receipts = [receipt for receipt in snapshot.receipts
+                if not mixed or receipt.unit == "security_units" or receipt.command_id in orders]
     references = defaultdict(set)
-    if orders.keys() != {receipt.command_id for receipt in snapshot.receipts}:
+    if orders.keys() != {receipt.command_id for receipt in receipts}:
         raise ValueError("Security orders and receipts differ")
-    for receipt in snapshot.receipts:
+    for receipt in receipts:
         decision, intent = orders[receipt.command_id]
         if (receipt.unit != "security_units" or receipt.tick != decision.tick
                 or receipt.actor_id != decision.actor_id or receipt.decision_id != decision.decision_id):
@@ -56,6 +59,80 @@ def validate_security_receipts(snapshot):
             raise ValueError("Security receipt differs from its journal settlement")
     if any(references[ref] != {"buyer_id", "seller_id"} for ref in entries):
         raise ValueError("Security settlement is missing a bilateral receipt")
+
+
+def execute_security_session(economy, context, commands, *, last_price, trade_count=0):
+    """Match one prefunded session against the economic participant's current resources."""
+    tick = context.tick
+    venue = MatchingVenue(ASSET, last_price)
+    venue.trade_count = trade_count
+    accounts = {a: economy.account_view(a) for a in context.actors}
+    offered, cash = defaultdict(int), {a: v.available_cash_minor for a,v in accounts.items()}
+    orders, rejected, filled = {}, {}, defaultdict(list)
+    for command in commands:
+        intent = command.intent
+        if not isinstance(intent, SecurityOrderIntent) or intent.asset_id != ASSET:
+            rejected[command.command_id] = "invalid_security_order"
+            continue
+        order = ReserveCommand(command_id=command.command_id, order_id=intent.intent_id,
+            reservation_id="session:"+intent.intent_id, account_id=command.actor_id, asset_id=ASSET,
+            side=intent.side, limit_price_ticks=intent.price_ticks, quantity_units=intent.quantity_units)
+        orders[command.command_id] = order
+        if order.side == "sell":
+            if offered[order.account_id] + order.quantity_units > economy.security_units(order.account_id):
+                rejected[command.command_id] = "insufficient_security_units"
+                continue
+            offered[order.account_id] += order.quantity_units
+            venue.match(order, command.decision_id, tick, [])
+    # Session sellers publish funded resting orders. Buyers execute in kernel
+    # priority order and their residual cannot rest or fund any later order.
+    entries = []
+    for command in commands:
+        order = orders.get(command.command_id)
+        if order is None or order.side != "buy":
+            continue
+        try:
+            required = notional(order.limit_price_ticks, 1, order.quantity_units)
+        except (OverflowError, ValueError):
+            rejected[command.command_id] = "invalid_security_notional"
+            continue
+        if required > cash[order.account_id]:
+            rejected[command.command_id] = "insufficient_security_cash"
+            continue
+        try:
+            plan = venue.plan(order)
+        except LedgerReject as exc:
+            rejected[command.command_id] = str(exc)
+            continue
+        for trade in venue.match(order, command.decision_id, tick, plan):
+            entry = economy.settle_security(trade)
+            gross = entry.details["gross_minor"]
+            cash[trade.buyer_id] -= gross
+            entries.append(entry)
+            filled[trade.buy_order_id].append((trade.quantity_units, -gross, entry.tx_id))
+            filled[trade.sell_order_id].append((trade.quantity_units, gross, entry.tx_id))
+        venue.cancel(order.order_id)
+
+    receipts = []
+    for seq, command in enumerate(commands, context.execution_seq + 1):
+        error, order = rejected.get(command.command_id), orders.get(command.command_id)
+        fills = filled.get(order.order_id, []) if order else []
+        quantity = sum(f[0] for f in fills)
+        accepted = 0 if error else order.quantity_units
+        receipts.append(EconomicExecutionReceipt(command_id=command.command_id, decision_id=command.decision_id,
+            actor_id=command.actor_id, tick=tick, world_version=context.world_version, execution_seq=seq,
+            status="rejected" if error else "partially_executed" if 0 < quantity < accepted else "accepted",
+            outcome="rejected" if error else "security_filled" if fills else "security_unfilled",
+            reason_codes=[error] if error else ["session_remainder_expired"] if quantity < accepted else [],
+            unit="security_units", executed_quantity=quantity, accepted_quantity=accepted,
+            cash_delta_minor=sum(f[1] for f in fills), ledger_tx_ids=[f[2] for f in fills]))
+    return receipts, entries
+
+
+def security_period(tick, entries):
+    return {"tick": tick, "close_minor": entries[-1].payload["price_ticks"] if entries else None,
+            "fill_count": len(entries), "volume_units": sum(e.payload["quantity_units"] for e in entries),
+            "journal_tx_ids": [e.tx_id for e in entries]}
 
 
 class SecurityPolicy:
@@ -161,77 +238,12 @@ class SecurityMarket:
 
     def execute_batch(self, context, commands):
         state, tick = context.data[STATE], context.tick
-        venue = MatchingVenue(ASSET, state["last_price_minor"])
-        venue.trade_count = sum(row["fill_count"] for row in state["history"])
-        accounts = {a: self.economy.account_view(a) for a in context.actors}
-        offered, cash = defaultdict(int), {a: v.available_cash_minor for a,v in accounts.items()}
-        orders, rejected, filled = {}, {}, defaultdict(list)
-        for command in commands:
-            intent = command.intent
-            if not isinstance(intent, SecurityOrderIntent) or intent.asset_id != ASSET:
-                rejected[command.command_id] = "invalid_security_order"
-                continue
-            order = ReserveCommand(command_id=command.command_id, order_id=intent.intent_id,
-                reservation_id="session:"+intent.intent_id, account_id=command.actor_id, asset_id=ASSET,
-                side=intent.side, limit_price_ticks=intent.price_ticks, quantity_units=intent.quantity_units)
-            orders[command.command_id] = order
-            if order.side == "sell":
-                if offered[order.account_id] + order.quantity_units > accounts[order.account_id].goods_units:
-                    rejected[command.command_id] = "insufficient_security_units"
-                    continue
-                offered[order.account_id] += order.quantity_units
-                venue.match(order, command.decision_id, tick, [])
-        # Session sellers publish funded resting orders. Buyers execute in kernel
-        # priority order and their residual cannot rest or fund any later order.
-        entries = []
-        for command in commands:
-            order = orders.get(command.command_id)
-            if order is None or order.side != "buy":
-                continue
-            try:
-                required = notional(order.limit_price_ticks, 1, order.quantity_units)
-            except (OverflowError, ValueError):
-                rejected[command.command_id] = "invalid_security_notional"
-                continue
-            if required > cash[order.account_id]:
-                rejected[command.command_id] = "insufficient_security_cash"
-                continue
-            try:
-                plan = venue.plan(order)
-            except LedgerReject as exc:
-                rejected[command.command_id] = str(exc)
-                continue
-            for trade in venue.match(order, command.decision_id, tick, plan):
-                entry = self.economy.settle_security(trade)
-                gross = entry.details["gross_minor"]
-                cash[trade.buyer_id] -= gross
-                entries.append(entry)
-                filled[trade.buy_order_id].append((trade.quantity_units, -gross, entry.tx_id))
-                filled[trade.sell_order_id].append((trade.quantity_units, gross, entry.tx_id))
-            venue.cancel(order.order_id)
-
-        receipts = []
-        for seq, command in enumerate(commands, context.execution_seq + 1):
-            error, order = rejected.get(command.command_id), orders.get(command.command_id)
-            fills = filled.get(order.order_id, []) if order else []
-            quantity = sum(f[0] for f in fills)
-            accepted = 0 if error else order.quantity_units
-            receipts.append(EconomicExecutionReceipt(command_id=command.command_id, decision_id=command.decision_id,
-                actor_id=command.actor_id, tick=tick, world_version=context.world_version, execution_seq=seq,
-                status="rejected" if error else "partially_executed" if 0 < quantity < accepted else "accepted",
-                outcome="rejected" if error else "security_filled" if fills else "security_unfilled",
-                reason_codes=[error] if error else ["session_remainder_expired"] if quantity < accepted else [],
-                unit="security_units", executed_quantity=quantity, accepted_quantity=accepted,
-                cash_delta_minor=sum(f[1] for f in fills), ledger_tx_ids=[f[2] for f in fills]))
-        row = self._period(tick, entries)
-        return BatchExecutionResult(data={**context.data, STATE: {**state, "last_price_minor":venue.last_price_ticks,
-                        "history": [*state["history"], row]}}, receipts=receipts)
-
-    @staticmethod
-    def _period(tick, entries):
-        return {"tick": tick, "close_minor":entries[-1].payload["price_ticks"] if entries else None,
-                "fill_count":len(entries), "volume_units":sum(e.payload["quantity_units"] for e in entries),
-                "journal_tx_ids":[e.tx_id for e in entries]}
+        receipts, entries = execute_security_session(self.economy, context, commands,
+            last_price=state["last_price_minor"], trade_count=sum(row["fill_count"] for row in state["history"]))
+        row = security_period(tick, entries)
+        return BatchExecutionResult(data={**context.data, STATE: {
+            **state, "last_price_minor": row["close_minor"] or state["last_price_minor"],
+            "history": [*state["history"], row]}}, receipts=receipts)
 
     def feedback(self, context, receipts):
         return Feedback(data=context.data)
@@ -246,7 +258,7 @@ class SecurityMarket:
                 by_tick[entry.tick].append(entry)
             elif entry.kind != "opening":
                 raise ValueError("Security-only world contains an unrelated economic event")
-        expected = [self._period(t, by_tick[t]) for t in range(1,context.tick+1)]
+        expected = [security_period(t, by_tick[t]) for t in range(1,context.tick+1)]
         closes = [row["close_minor"] for row in expected if row["close_minor"] is not None]
         fundamental = self.settings.initial_price_minor - (
             self.settings.fundamental_drop_minor if context.tick >= self.settings.shock_tick else 0)

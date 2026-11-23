@@ -1,6 +1,6 @@
 # SCOPE_LOCK / Laputa MCRP
 
-**Base HEAD** `e40f1dd49f415685bb05d6ca9d3632fe340cab45` · **Current stage** 01 · **Branch** `feature/laputa-convergence`
+**Stage 02 base** `2efd7749ae515e3603abfceba45378a100ff6c3f` · **Current stage** 02 · **Branch** `feature/laputa-convergence`
 
 **One target behavior**
 
@@ -30,4 +30,6 @@
 
 [积压项](BACKLOG.md) 为 LATER。本轮范围包括本地提交；远端推送、公开发布、修改许可和付费模型调用需另行授权。
 
-**Result** PASS，见 [阶段 01 状态](TASK_STATUS.md)。
+**Stage 02 slice** · root 7、5 期、两组同初态配对。第 2 期记合成标价，第 3 期按可见财富调整采购，第 4 期读取真实销量和消费，第 5 期核对工资。沿用现有撮合、同一本经济簿及权限制约。验收包含证券数量/成本、预算预占、双方回执、零成交、故障回滚和续跑/执行重放。
+
+**Result** · PASS，见 [阶段 02 实测](STAGE_02.md)。

@@ -8,16 +8,19 @@ from civitas.contracts.base import content_hash
 from civitas.contracts.economic import (
     CooperationIntent, EconomicExecutionReceipt, FirstPayrollHold, LaborAcceptIntent, LaborApplyIntent, LaborContract, LaborOffer,
     LaborVacancyClosure, PayrollCashReservation, PayrollInstallment, PurchaseIntent,
+    SECURITY_ASSET, SecurityOrderIntent,
 )
 from civitas.contracts.events import Event
 from civitas.contracts.observations import ObservationFact
 from civitas.contracts.state import BatchExecutionResult, Feedback
 from civitas.core.rng import AddressedRNG
 from civitas.economy import EconomicRuntime
+from civitas.economy.runtime import SECURITY_MARK_EVENT, SecurityOpening
 from civitas.economy.fiscal import OPERATIONS, TREASURY, fiscal_facts, fiscal_metrics
 from civitas.economy.banking import GUARANTOR, ISSUER, bank_facts
 from civitas.relations.store import RelationStore
 from .closed_economy_config import ClosedEconomyConfig
+from .security_market import execute_security_session, security_period, validate_security_receipts
 from .closed_economy_cooperation import (
     COMPARISON_ROUND, FIRST_ROUND, FOLLOWUP_ROUND, cooperation_fact, cooperation_outcome_facts, cooperation_slot,
     offered_round, partner_continuation, record_cooperation_choice, settle_pending_cooperation, trust_trial_slot,
@@ -82,8 +85,19 @@ class ClosedEconomy:
             initial_cash.update({TREASURY: c.fiscal.initial_cash_minor, OPERATIONS: 0})
         if c.banking is not None:
             initial_cash.update({**c.banking.initial_bank_cash, ISSUER: 0, GUARANTOR: c.banking.guarantee_budget_minor})
+        self.security_event = None
+        security_opening = None
+        if c.security_feedback is not None:
+            security_opening = SecurityOpening(
+                units={self.households[i]: 1 for i in c.security_feedback.holder_indices},
+                price_minor=c.securities.initial_price_minor, mark_tick=c.securities.shock_tick)
+            self.security_event = Event(event_id=SECURITY_MARK_EVENT, root_event_id=SECURITY_MARK_EVENT,
+                tick=security_opening.mark_tick, phase="EVENTS", kind="security_mark", actors=[],
+                payload={"asset_id": SECURITY_ASSET},
+                visible_at={"tick": security_opening.mark_tick + 1, "phase": "OBSERVE"})
         self.economy = EconomicRuntime(initial_cash,
-            labor_cost_per_unit_minor=c.labor_cost_per_unit_minor, fiscal=c.fiscal, banking=c.banking)
+            labor_cost_per_unit_minor=c.labor_cost_per_unit_minor, fiscal=c.fiscal, banking=c.banking,
+            security_opening=security_opening)
         for index, firm in enumerate(self.firms):
             self.economy.set_quote(f"quote:1:{firm}", firm,
                 c.initial_price_minor + index * c.firm_price_gap_minor,
@@ -130,7 +144,7 @@ class ClosedEconomy:
                 second = self.labor_offer.model_copy(update={
                     "offer_id": offer_id + ":2", "worker_id": self.households[indices[0]]})
                 self.labor_slots[second.offer_id] = (second, frozenset(self.households[i] for i in indices))
-        self.events = []
+        self.events = [self.security_event] if self.security_event is not None else []
         if c.fault_tick is not None:
             event_id = f"delivery-fault:{c.fault_tick}:{self.firms[c.fault_seller_index]}"
             self.events.append(Event(event_id=event_id, root_event_id=event_id,
@@ -146,6 +160,7 @@ class ClosedEconomy:
             "labor_carry": {firm: 0 for firm in self.firms},
             "labor_events": [], "production_events": [], "macro_history": [],
             "fault_trace": [], "active_fault_seller": None,
+            **({"security_session": None} if self.security_event is not None else {}),
             "last_macro": {"tick": 0, "sold_units_by_seller": {f: 0 for f in self.firms}},
             **({"labor_contract": None} if self.labor_offer is not None and self.shared_payroll is None else {}),
             **{window.state_key: None for window in self.followup_windows.values()},
@@ -348,12 +363,19 @@ class ClosedEconomy:
         return data
 
     def apply_event(self, context, event):
+        if event == self.security_event:
+            self.economy.mark_security(self._security_mark_price())
+            return context.data
         if (event.kind != "delivery_fault_schedule" or event.phase != "EVENTS"
                 or event.payload.get("seller_id") not in self.firms):
             raise ValueError("Unknown closed-economy event")
         data = context.working_dump()["data"]
         data[SCENARIO_FIELD]["active_fault_seller"] = event.payload["seller_id"]
         return data
+
+    def _security_mark_price(self):
+        terms = self.config.securities
+        return terms.initial_price_minor - (terms.fundamental_drop_minor if self.config.security_feedback.shock_enabled else 0)
 
     async def prepare_observations(self, context):
         return context.data
@@ -393,6 +415,21 @@ class ClosedEconomy:
         facts = [ObservationFact(fact_id=f"account:{context.tick}:v{context.world_version}:{actor_id}",
             category="account", owner_id=actor_id, visible_at=now,
             value=self.economy.account_view(actor_id).model_dump())]
+        if self.security_event is not None:
+            units = self.economy.security_units(actor_id)
+            maker = actor_id == self.firms[-1]
+            if context.tick == self.security_event.tick and (units or maker):
+                facts.append(ObservationFact(fact_id=f"security-order:{context.tick}:{actor_id}",
+                    category="market", owner_id=actor_id, visible_at=now,
+                    value={"kind": "security_order_terms", "asset_id": SECURITY_ASSET,
+                           "side": "buy" if maker else "sell", "quantity_units": 1,
+                           "price_ticks": self.config.securities.initial_price_minor}))
+            mark = self.economy.security_mark
+            if (mark is not None and mark.tick < context.tick and units and actor_id in self.population
+                    and self.config.security_feedback.wealth_observed):
+                facts.append(ObservationFact(fact_id=f"security-wealth:{context.tick}:{actor_id}",
+                    category="market", owner_id=actor_id, visible_at=now,
+                    value={"kind": "security_wealth", **self.economy.security_wealth(actor_id)}))
         shock = self.config.labor_income_shock
         if shock is not None and shock.tick == context.tick and actor_id in self.income_shock_workers:
             work = next((e for e in reversed(own["labor_events"]) if e["tick"] == context.tick
@@ -472,6 +509,19 @@ class ClosedEconomy:
     def execute_batch(self, context, commands):
         data = context.working_dump()["data"]
         own = data[SCENARIO_FIELD]
+        security_receipts = {}
+        if self.security_event is not None:
+            ordered = [(context.execution_seq + i, command) for i, command in enumerate(commands, 1)
+                       if isinstance(command.intent, SecurityOrderIntent)]
+            if context.tick == self.security_event.tick:
+                settled, entries = execute_security_session(self.economy, context,
+                    [command for _, command in ordered], last_price=self.config.securities.initial_price_minor)
+                # The prefunded session clears first; receipts retain the kernel's command order.
+                security_receipts = {receipt.command_id: receipt.model_copy(update={"execution_seq": sequence})
+                    for (sequence, _), receipt in zip(ordered, settled, strict=True)}
+                own["security_session"] = security_period(context.tick, entries)
+            elif ordered:
+                raise ValueError("Security orders require the registered joint session")
         cooperation = self._offered_cooperation(context)
         if cooperation is not None:
             own[cooperation_slot(self.config.cooperation, context.tick)] = cooperation
@@ -502,6 +552,8 @@ class ClosedEconomy:
         applications = []
         followups = []
         def command_group(command):
+            if command.command_id in security_receipts:
+                return "security"
             if isinstance(command.intent, CooperationIntent):
                 return "cooperation"
             if isinstance(command.intent, (LaborAcceptIntent, LaborApplyIntent)):
@@ -510,7 +562,9 @@ class ClosedEconomy:
 
         for group_kind, batch in groupby(commands, key=command_group):
             start = context.execution_seq + len(receipts)
-            if group_kind == "cooperation":
+            if group_kind == "security":
+                receipts.extend(security_receipts[command.command_id] for command in batch)
+            elif group_kind == "cooperation":
                 receipts.extend(record_cooperation_choice(cooperation, command, start + i)
                                 for i, command in enumerate(batch, 1))
             elif group_kind == "labor":
@@ -686,8 +740,24 @@ class ClosedEconomy:
                 memories.extend(cooperation_outcome_facts(own[slot], context.tick, self.economy.journal))
         return Feedback(data=data, memories=memories)
 
+    def validate_snapshot(self, snapshot):
+        if self.security_event is not None:
+            validate_security_receipts(snapshot, mixed=True)
+
     def validate(self, context):
         own = context.data[SCENARIO_FIELD]
+        if self.security_event is not None:
+            tick = self.security_event.tick
+            mark = self.economy.security_mark
+            expected = None
+            if context.tick >= tick:
+                if mark is None or mark.tick != tick or mark.payload["price_minor"] != self._security_mark_price():
+                    raise ValueError("Joint security mark differs from its schedule")
+                expected = security_period(tick, [e for e in self.economy.journal if e.kind == "security_trade"])
+            elif mark is not None:
+                raise ValueError("Joint security mark precedes its schedule")
+            if own["security_session"] != expected:
+                raise ValueError("Joint security session differs from the journal")
         if (set(context.actors) != set(self.actors) or own["population"] != self.population
                 or own["population_hash"] != content_hash(self.population)):
             raise ValueError("Closed-economy population/config identity changed")

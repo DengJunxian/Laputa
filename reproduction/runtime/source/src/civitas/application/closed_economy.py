@@ -16,7 +16,7 @@ from .cognition import bind_invocation_receipts
 def build_closed_economy(config, *, policy=None, runtime=None, phase_hook=None):
     config = ClosedEconomyConfig.model_validate(config)
     rng = AddressedRNG(config.root_seed, config.replica)
-    if config.securities is not None:
+    if config.securities is not None and config.security_feedback is None:
         from civitas.core.observation import ObservationBuilder
         from civitas.scenarios.security_market import SecurityMarket, SecurityPolicy
 

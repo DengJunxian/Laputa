@@ -18,7 +18,7 @@ from civitas.contracts.economic import (
     Amount, ConsumeIntent, EconomicAccountView, EconomicCommand,
     EconomicExecutionReceipt, EconomicJournalEntry, EconomicPosting,
     EconomicRuntimeState, GoodsMovement, GoodsQuote, PayrollCashReservation, PayrollInstallment, PositiveAmount,
-    PurchaseIntent, QuoteIntent,
+    PurchaseIntent, QuoteIntent, SECURITY_ASSET,
 )
 from civitas.contracts.portfolio import PortfolioTrade
 from civitas.contracts.portfolio import MAX_INT
@@ -46,10 +46,24 @@ class _ExecutionPrefix:
     received_this_tick: dict[str, int]
 
 
+class SecurityOpening(Record):
+    units: dict[Id, PositiveAmount]
+    price_minor: PositiveAmount
+    mark_tick: PositiveAmount
+
+
+class _SecurityMark(Record):
+    price_minor: PositiveAmount
+
+
+SECURITY_MARK_EVENT = "security:mark"
+
+
 class _Opening(Record):
     cash: dict[Id, Amount]
     goods: dict[Id, Amount]
     inventory_cost: dict[Id, Amount]
+    security: SecurityOpening | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class _Wage(Record):
@@ -116,6 +130,7 @@ _PAYLOADS = {
     "bank_withdrawal": banking_domain.BankWithdrawalEvent,
     "credit_application": banking_domain.CreditApplicationEvent,
     "security_trade": PortfolioTrade,
+    "security_mark": _SecurityMark,
 }
 _BANK_REQUESTS = {"withdraw_deposit": ("bank_withdrawal", "withdrawal_queued"),
                   "apply_credit": ("credit_application", "credit_application_recorded")}
@@ -134,6 +149,8 @@ _BASE_ACCOUNT_CODES = _ACCOUNT_CODES - {"link_fee_expense", "link_fee_income", "
 _ACCOUNTS = tuple(sorted(_BASE_ACCOUNT_CODES))
 _EXPENSES = ("cost_of_goods_sold", "consumption_expense", "spoilage_expense", "link_fee_expense",
              "labor_switch_fee_expense", "cooperation_expense", "wage_variance_expense")
+_BACKENDS = {1: "fixedpoint_m0_economy", 2: "fixedpoint_institutional_economy",
+             3: "fixedpoint_joint_security_economy"}
 
 
 class EconomicRuntime:
@@ -149,11 +166,12 @@ class EconomicRuntime:
 
     def __init__(self, initial_cash, *, initial_goods=None, initial_inventory_cost=None,
                  currency_id="SIM", good_id="good", cash_scale=1,
-                 labor_cost_per_unit_minor=1, fiscal=None, banking=None):
+                 labor_cost_per_unit_minor=1, fiscal=None, banking=None, security_opening=None):
         self.fiscal = fiscal_domain.FiscalPolicy.model_validate(fiscal) if fiscal is not None else None
         self.banking = banking_domain.BankingConfig.model_validate(banking) if banking is not None else None
         self.state_schema_version = 2 if self.fiscal is not None or self.banking is not None else 1
         self._institution_hash = content_hash({'fiscal': self.fiscal, 'banking': self.banking}) if self.state_schema_version == 2 else None
+        self._security_opening = None if security_opening is None else SecurityOpening.model_validate(security_opening)
         self._bank_positions = banking_domain.BankPositions()
         self._debit_codes, self._credit_codes = set(_DEBIT), set(_CREDIT)
         self._expense_codes = _EXPENSES
@@ -165,6 +183,14 @@ class EconomicRuntime:
             self._debit_codes.update(banking_domain.DEBIT_CODES)
             self._credit_codes.update(banking_domain.CREDIT_CODES)
             self._expense_codes += banking_domain.EXPENSES
+        if self._security_opening is not None:
+            if (self.banking is None or self.fiscal is None or good_id == SECURITY_ASSET
+                    or not self._security_opening.units
+                    or not self._security_opening.units.keys() <= initial_cash.keys()):
+                raise ValueError("Joint security opening requires distinct resources and registered economic owners")
+            self.state_schema_version = 3
+            self._debit_codes.update(("security_inventory", "security_disposal_cost"))
+            self._credit_codes.add("security_sale_proceeds")
         self._allowed_codes = self._debit_codes | self._credit_codes
         opening = _Opening(cash=initial_cash, goods={} if initial_goods is None else initial_goods,
                            inventory_cost={} if initial_inventory_cost is None else initial_inventory_cost)
@@ -204,6 +230,7 @@ class EconomicRuntime:
         self.tick = self.world_version = 0
         self._balances = {a: {k: 0 for k in _ACCOUNTS} for a in actors}
         self._goods = {a: 0 for a in actors}
+        self._security_units = {a: 0 for a in actors} if self._security_opening is not None else {}
         self._wages = {}
         self._payroll_reservations = {}
         self._journal = {}
@@ -217,6 +244,7 @@ class EconomicRuntime:
         self._post_event("opening", "system:opening", {
             "cash": self._initial_cash, "goods": self._initial_goods,
             "inventory_cost": self._initial_cost,
+            **({"security": self._security_opening.model_dump()} if self._security_opening is not None else {}),
         })
 
     @property
@@ -242,7 +270,7 @@ class EconomicRuntime:
 
     def _net_worth(self, balances):
         value = (balances["cash"] + balances["inventory"] + balances["work_in_progress"]
-                 + balances["wage_receivable"] + balances["wage_payable"])
+                 + balances["wage_receivable"] + balances["wage_payable"] + balances.get("security_inventory", 0))
         if self.fiscal is not None:
             value += balances.get("tax_receivable", 0) + balances.get("tax_payable", 0)
         if self.banking is not None:
@@ -265,6 +293,28 @@ class EconomicRuntime:
     def quotes(self):
         """All immutable quotes; observers filter effective/expiry at their barrier."""
         return list(self._quotes.values())
+
+    def security_units(self, actor):
+        return self._security_units[actor] if self._security_opening is not None else self._goods[actor]
+
+    @property
+    def security_mark(self):
+        return self._journal.get(SECURITY_MARK_EVENT)
+
+    def mark_security(self, price_minor):
+        self._boundary_only()
+        return self._post_event("security_mark", SECURITY_MARK_EVENT, {"price_minor": price_minor})
+
+    def security_wealth(self, actor):
+        mark = self.security_mark
+        opening = self._security_opening
+        units = self._security_units[actor]
+        cost = self._balances[actor].get("security_inventory", 0)
+        marked = notional(mark.payload["price_minor"], 1, units)
+        return {"asset_id": SECURITY_ASSET, "units": units, "cost_minor": cost, "market_value_minor": marked,
+                "market_value_change_minor": marked - notional(opening.price_minor, 1, units),
+                "marked_net_worth_minor": self.account_view(actor).net_worth_minor - cost + marked,
+                "mark_tx_id": mark.tx_id}
 
     def begin_tick(self, tick, world_version):
         checked(tick)
@@ -440,24 +490,36 @@ class EconomicRuntime:
                     tx_id=tx_id, entity_id=actor, currency_id=self.currency_id,
                     account_code=account, side=side, amount_minor=amount))
 
-        def move(movement_kind, quantity, source=None, destination=None):
+        def move(movement_kind, quantity, source=None, destination=None, *, resource_id=None):
             if quantity:
                 movements.append(GoodsMovement(movement_id=f"{tx_id}:g:{len(movements)}",
-                    kind=movement_kind, resource_id=self.good_id, quantity_units=quantity,
+                    kind=movement_kind, resource_id=self.good_id if resource_id is None else resource_id, quantity_units=quantity,
                     from_owner=source, to_owner=destination))
 
         if kind == "opening":
             expected = {"cash": self._initial_cash, "goods": self._initial_goods,
-                        "inventory_cost": self._initial_cost}
+                        "inventory_cost": self._initial_cost,
+                        **({"security": self._security_opening.model_dump()} if self._security_opening is not None else {})}
             if self._journal or event_id != "system:opening" or tick != 0 or payload != expected:
                 raise ValueError("Only the configured opening endowment may initialize the book")
             for actor in self.actor_ids:
                 cash, cost, quantity = payload["cash"][actor], payload["inventory_cost"][actor], payload["goods"][actor]
                 post(actor, "cash", "debit", cash)
                 post(actor, "inventory", "debit", cost)
-                post(actor, "opening_equity", "credit", checked(cash + cost))
+                security_cost = 0
+                if self._security_opening is not None:
+                    units = self._security_opening.units.get(actor, 0)
+                    security_cost = notional(self._security_opening.price_minor, 1, units)
+                    post(actor, "security_inventory", "debit", security_cost)
+                    move("opening", units, destination=actor, resource_id=SECURITY_ASSET)
+                post(actor, "opening_equity", "credit", checked(cash + cost + security_cost))
                 move("opening", quantity, destination=actor)
             details = {"cash_created_minor": self._cash_total, "goods_created_units": sum(payload["goods"].values())}
+        elif kind == "security_mark":
+            if (self._security_opening is None or tick != self._security_opening.mark_tick
+                    or event_id != SECURITY_MARK_EVENT or payload["price_minor"] > self._security_opening.price_minor):
+                raise ValueError("Security mark differs from its registered window")
+            details = {"asset_id": SECURITY_ASSET, "source": "synthetic_exogenous_mark"}
         elif kind == "bank":
             event = banking_domain.BankEvent.model_validate(payload)
             if self.banking is None or event_id != f"bank:{tick}:{event.action}:{event.reference}":
@@ -584,9 +646,12 @@ class EconomicRuntime:
             self._require_actor(seller)
             if buyer == seller:
                 raise EconomicReject("self_purchase")
+            joint_trade = kind == "security_trade" and self._security_opening is not None
             if kind == "security_trade":
-                if (not self.good_id.startswith("security:") or self.banking is not None or self.fiscal is not None
-                        or payload["asset_id"] != self.good_id or payload["tick"] != tick or not quantity
+                funded = (tick == self._security_opening.mark_tick if joint_trade else
+                          self.good_id.startswith("security:") and self.banking is None and self.fiscal is None)
+                asset = SECURITY_ASSET if joint_trade else self.good_id
+                if (not funded or payload["asset_id"] != asset or payload["tick"] != tick or not quantity
                         or not payload["price_ticks"] or event_id != f"security-fill:{payload['trade_id']}"):
                     raise ValueError("Security fill is outside its funded asset, identity or session")
                 price = payload["price_ticks"]
@@ -600,18 +665,20 @@ class EconomicRuntime:
             gross = notional(price, 1, quantity)
             if gross > self._available_cash(buyer):
                 raise EconomicReject("insufficient_cash")
-            if quantity > self._goods[seller]:
+            held = self._security_units[seller] if joint_trade else self._goods[seller]
+            inventory = "security_inventory" if joint_trade else "inventory"
+            if quantity > held:
                 raise EconomicReject("insufficient_goods")
-            cost = self._balances[seller]["inventory"] * quantity // self._goods[seller]
+            cost = self._balances[seller].get(inventory, 0) * quantity // held
             details = {"accepted_quantity": quantity, "gross_minor": gross, "carrying_cost_minor": cost}
             if kind in ("purchase", "security_trade"):
-                post(buyer, "inventory", "debit", gross)
+                post(buyer, inventory, "debit", gross)
                 post(buyer, "cash", "credit", gross)
                 post(seller, "cash", "debit", gross)
-                post(seller, "sales_income", "credit", gross)
-                post(seller, "cost_of_goods_sold", "debit", cost)
-                post(seller, "inventory", "credit", cost)
-                move("transfer", quantity, seller, buyer)
+                post(seller, "security_sale_proceeds" if joint_trade else "sales_income", "credit", gross)
+                post(seller, "security_disposal_cost" if joint_trade else "cost_of_goods_sold", "debit", cost)
+                post(seller, inventory, "credit", cost)
+                move("transfer", quantity, seller, buyer, resource_id=SECURITY_ASSET if joint_trade else None)
             else:
                 # Accepted payment and its refund have explicit, balanced legs.
                 # No sale revenue is earned and no goods are assigned to the buyer.
@@ -658,15 +725,28 @@ class EconomicRuntime:
             row[p.account_code] = value
         if any(balance_checks.values()):
             raise ValueError("Each entity/currency transaction must balance")
+        securities = {}
         for movement in entry.goods_movements:
-            if movement.resource_id != self.good_id:
+            if movement.resource_id == self.good_id:
+                changes, holdings = goods, self._goods
+            elif self._security_opening is not None and movement.resource_id == SECURITY_ASSET:
+                changes, holdings = securities, self._security_units
+            else:
                 raise ValueError("Unknown physical resource")
             if movement.from_owner is not None:
-                previous = goods.get(movement.from_owner, self._goods[movement.from_owner])
-                goods[movement.from_owner] = checked(previous - movement.quantity_units)
+                previous = changes.get(movement.from_owner, holdings[movement.from_owner])
+                changes[movement.from_owner] = checked(previous - movement.quantity_units)
             if movement.to_owner is not None:
-                previous = goods.get(movement.to_owner, self._goods[movement.to_owner])
-                goods[movement.to_owner] = checked(previous + movement.quantity_units)
+                previous = changes.get(movement.to_owner, holdings[movement.to_owner])
+                changes[movement.to_owner] = checked(previous + movement.quantity_units)
+        if self._security_opening is not None:
+            issued = sum(self._security_opening.units.values()) if entry.kind == "opening" else 0
+            if sum(units - self._security_units[actor] for actor, units in securities.items()) != issued:
+                raise ValueError("Security quantity conservation failure")
+            for actor in securities.keys() | balances.keys():
+                units = securities.get(actor, self._security_units[actor])
+                if not units and balances.get(actor, self._balances[actor]).get("security_inventory", 0):
+                    raise ValueError("Empty security position must have zero carrying cost")
         employer = worker = None
         wage_delta = 0
         if entry.kind in ("wage_accrual", "wage_payment"):
@@ -712,6 +792,7 @@ class EconomicRuntime:
             del self._payroll_reservations[entry.payload["reservation_id"]]
         self._balances.update(balances)
         self._goods.update(goods)
+        self._security_units.update(securities)
         self._wages.update(wage_change)
         self._bank_positions = bank_positions
 
@@ -892,11 +973,13 @@ class EconomicRuntime:
         return ({a: dict(b) for a, b in self._balances.items()}, dict(self._goods), dict(self._wages),
                 dict(self._journal), dict(self._quotes), dict(self._commands), dict(self._receipts),
                 dict(self._payroll_reservations), self._bank_positions,
-                None if self._decision_cash_budget is None else dict(self._decision_cash_budget))
+                None if self._decision_cash_budget is None else dict(self._decision_cash_budget),
+                dict(self._security_units))
 
     def _restore_live(self, state):
         (self._balances, self._goods, self._wages, self._journal, self._quotes,
-         self._commands, self._receipts, self._payroll_reservations, self._bank_positions, self._decision_cash_budget) = state
+         self._commands, self._receipts, self._payroll_reservations, self._bank_positions, self._decision_cash_budget,
+         self._security_units) = state
         self._checked_execution = None
         self._history_capture = {}
 
@@ -919,7 +1002,7 @@ class EconomicRuntime:
             candidate = EconomicRuntime(self._initial_cash, initial_goods=self._initial_goods,
                 initial_inventory_cost=self._initial_cost, currency_id=self.currency_id, good_id=self.good_id,
                 cash_scale=self.cash_scale, labor_cost_per_unit_minor=self.labor_cost_per_unit_minor,
-                fiscal=self.fiscal, banking=self.banking)
+                fiscal=self.fiscal, banking=self.banking, security_opening=self._security_opening)
             if not journal or content_hash(journal[0]) != content_hash(candidate.journal[0]):
                 raise ValueError("Opening journal differs from configuration")
             candidate._journal[journal[0].event_id] = journal[0]
@@ -959,6 +1042,8 @@ class EconomicRuntime:
         rebuilt = self._rebuild(full=full_history)
         if (rebuilt._balances, rebuilt._goods, rebuilt._wages) != (self._balances, self._goods, self._wages):
             raise ValueError("Cached accounts/quantities differ from journal reconstruction")
+        if rebuilt._security_units != self._security_units:
+            raise ValueError("Security quantities differ from journal reconstruction")
         if rebuilt._bank_positions != self._bank_positions:
             raise ValueError("Bank claims or contract state differ from journal reconstruction")
         if rebuilt._payroll_reservations != self._payroll_reservations:
@@ -1138,7 +1223,7 @@ class EconomicRuntime:
     def _export_state(self, journal, commands, receipts):
         return {
             "schema_version": self.state_schema_version, "state_id": self.participant_id,
-            "backend": "fixedpoint_institutional_economy" if self._institution_hash else "fixedpoint_m0_economy",
+            "backend": _BACKENDS[self.state_schema_version],
             **({"institution_config_hash": self._institution_hash} if self._institution_hash else {}),
             **({"bank_positions": self._bank_positions.model_dump()} if self.banking is not None else {}),
             "currency_id": self.currency_id, "good_id": self.good_id, "cash_scale": self.cash_scale,
@@ -1146,6 +1231,7 @@ class EconomicRuntime:
             "initial_cash": dict(self._initial_cash), "initial_goods": dict(self._initial_goods),
             "initial_inventory_cost": dict(self._initial_cost), "tick": self.tick, "world_version": self.world_version,
             "balances": {a: dict(b) for a, b in self._balances.items()}, "goods": dict(self._goods),
+            **({"security_units": dict(self._security_units)} if self._security_opening is not None else {}),
             "wage_obligations": [{"employer_id": employer, "worker_id": worker, "outstanding_minor": amount}
                                  for (employer, worker), amount in sorted(self._wages.items())],
             "journal": journal,
@@ -1161,17 +1247,20 @@ class EconomicRuntime:
         return content_hash({"currency_id": self.currency_id, "good_id": self.good_id,
             "cash_scale": self.cash_scale, "labor_cost_per_unit_minor": self.labor_cost_per_unit_minor,
             "initial_cash": self._initial_cash, "initial_goods": self._initial_goods,
-            "initial_inventory_cost": self._initial_cost})
+            "initial_inventory_cost": self._initial_cost,
+            **({"security": self._security_opening} if self._security_opening is not None else {})})
 
     def import_state(self, state):
         envelope = EconomicRuntimeState.model_validate(state)
         if (envelope.schema_version != self.state_schema_version or envelope.institution_config_hash != self._institution_hash
-                or (envelope.backend == "fixedpoint_m0_economy") != (self.state_schema_version == 1)):
+                or envelope.backend != _BACKENDS[self.state_schema_version]
+                or (envelope.security_units is None) != (self._security_opening is None)):
             raise ValueError("Restore cannot change the economic protocol or institutional configuration")
         candidate = EconomicRuntime(envelope.initial_cash, initial_goods=envelope.initial_goods,
             initial_inventory_cost=envelope.initial_inventory_cost, currency_id=envelope.currency_id,
             good_id=envelope.good_id, cash_scale=envelope.cash_scale,
-            labor_cost_per_unit_minor=envelope.labor_cost_per_unit_minor, fiscal=self.fiscal, banking=self.banking)
+            labor_cost_per_unit_minor=envelope.labor_cost_per_unit_minor, fiscal=self.fiscal, banking=self.banking,
+            security_opening=self._security_opening)
         if candidate._configuration_identity() != self._configuration_identity():
             raise ValueError("Restore cannot replace the configured economic identity/endowments")
         require_unique([e.event_id for e in envelope.journal], "journal event")
@@ -1184,6 +1273,7 @@ class EconomicRuntime:
         candidate.tick, candidate.world_version = envelope.tick, envelope.world_version
         candidate._balances = {a: dict(b) for a, b in envelope.balances.items()}
         candidate._goods = dict(envelope.goods)
+        candidate._security_units = dict(envelope.security_units or {})
         candidate._wages = {(w.employer_id, w.worker_id): w.outstanding_minor for w in envelope.wage_obligations}
         candidate._journal = {e.event_id: e for e in envelope.journal}
         if (envelope.bank_positions is None) != (self.banking is None):

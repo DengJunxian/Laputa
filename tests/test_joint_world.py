@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
+from civitas.application.closed_economy import build_closed_economy
 from civitas.application import economic_run
 from civitas.cli_v4 import main
 from civitas.contracts.base import content_hash
@@ -15,7 +16,152 @@ from civitas.storage.commit_store import CommitStore, atomic_json, read_json
 from scripts.verify_joint_shift import audit, freeze
 
 
+SECURITY_FEEDBACK_FIXTURE = Path(__file__).resolve().parents[1] / 'examples/closed-economy-security-feedback.json'
+
+
 class JointWorldTests(unittest.IsolatedAsyncioTestCase):
+    async def test_security_shock_reaches_joint_economy(self):
+        config = read_json(SECURITY_FEEDBACK_FIXTURE)
+        feedback = config.pop('security_feedback')
+        with self.assertRaisesRegex(ValueError, 'exclusive funded asset'):
+            build_closed_economy(config)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stores = {}
+            for arm, toggles in (('shock', {}), ('flat', {'shock_enabled': False}),
+                                 ('hidden', {'wealth_observed': False})):
+                raw = {**config, 'security_feedback': {**feedback, **toggles}}
+                world, store = economic_run.create_run(raw, root / arm)
+                self.assertEqual([p.participant_id for p in world.participants], ['economic_runtime'])
+                self.assertEqual(store.identity.metadata['economic_model'], 'joint_prefunded_security_and_institutions')
+                stores[arm] = store
+                await economic_run.resume_run(root / arm)
+            for tick in (0, 1):
+                self.assertEqual(len({s.load(tick)[0].state_hash for s in stores.values()}), 1)
+
+            impact = {arm: store.load(2)[1] for arm, store in stores.items()}
+            books = {arm: snap.data['economic_runtime'] for arm, snap in impact.items()}
+            self.assertEqual(books['shock']['balances'], books['flat']['balances'])
+            self.assertEqual(books['shock']['decision_cash_budget'], books['flat']['decision_cash_budget'])
+            book = books['shock']
+            self.assertEqual((book['schema_version'], book['good_id']), (3, 'good'))
+            self.assertTrue({'bank:a', 'bank:b', 'public:treasury', 'firm:01', 'household:0007'} <= book['balances'].keys())
+            self.assertEqual(sum(book['security_units'].values()), 4)
+            self.assertEqual(book['security_units']['firm:01'], 1)
+            self.assertEqual(book['balances']['firm:01']['security_inventory'], 100)
+            mark, = [e for e in book['journal'] if e['kind'] == 'security_mark']
+            self.assertEqual((mark['payload']['price_minor'], mark['postings'], mark['goods_movements']), (10, [], []))
+            fill, = [e for e in book['journal'] if e['kind'] == 'security_trade']
+            seller = fill['payload']['seller_id']
+            self.assertEqual(book['balances'][seller]['sales_income'], 0)
+            self.assertEqual(book['balances'][seller]['security_sale_proceeds'], -100)
+            self.assertEqual(book['balances'][seller]['security_disposal_cost'], 100)
+            self.assertEqual(book['decision_cash_budget'][seller], book['balances'][seller]['cash'] - 100)
+            self.assertEqual(sum(row['cash'] for row in book['balances'].values()), sum(book['initial_cash'].values()))
+            self.assertEqual(fill['goods_movements'][0]['resource_id'], 'security:A')
+            linked = [r for r in impact['shock'].receipts if fill['tx_id'] in r.ledger_tx_ids]
+            self.assertEqual(sorted(r.cash_delta_minor for r in linked), [-100, 100])
+            self.assertTrue(all(r.unit == 'security_units' and r.goods_delta_units == 0 for r in linked))
+            self.assertTrue(any(r.outcome == 'security_unfilled' for r in impact['shock'].receipts))
+
+            for arm, store in stores.items():
+                marker, snapshot = store.load(3)
+                private = {o.actor_id: (o, f) for o in store.observation_rows(marker) for f in o.market_view
+                           if f.value.get('kind') == 'security_wealth'}
+                holders = {a for a, units in book['security_units'].items() if units and a.startswith('household:')}
+                self.assertEqual(set(private), holders if arm != 'hidden' else set())
+                self.assertFalse(any(f.value.get('kind') == 'security_wealth'
+                    for o in store.observation_rows(store.load(2)[0]) for f in o.market_view))
+                for actor, (obs, fact) in private.items():
+                    self.assertEqual(fact.owner_id, actor)
+                    self.assertEqual(fact.value['mark_tx_id'], mark['tx_id'])
+                    change = -90 if arm == 'shock' else 0
+                    self.assertEqual(fact.value['market_value_change_minor'], change)
+                    self.assertEqual(fact.value['marked_net_worth_minor'], obs.account_view[0].value['net_worth_minor'] + change)
+                    decision, = [d for d in snapshot.decisions if d.actor_id == actor and d.tick == 3]
+                    self.assertIn(fact.fact_id, decision.evidence_ids)
+                    self.assertEqual(decision.belief_patch['security_wealth_response']['reserve_increase_minor'], -change)
+                    self.assertEqual(sum(i.quantity_units for i in decision.economic_intents if i.kind == 'purchase'),
+                                     0 if arm == 'shock' else 2)
+                current = snapshot.data['economic_runtime']['balances']
+                self.assertEqual((current['bank:a']['loan_asset'], current['household:0003']['loan_payable']), (12, -12))
+                self.assertEqual((current['bank:a']['deposit_payable'], current['household:0003']['deposit_asset']), (-12, 12))
+                _, final = store.load(5)
+                own = final.data['closed_economy']
+                sales = 10 if arm == 'shock' else 16
+                macro = own['macro_history'][2]
+                self.assertEqual((macro['sold_units_by_seller']['firm:00'], macro['consumed_units']), (sales, sales))
+                self.assertEqual(macro['sales_minor_by_seller']['firm:00'], 11 * sales)
+                work, = [e for e in own['labor_events'] if e['tick'] == 5 and e['worker_id'] == 'household:0001']
+                self.assertEqual(work['employer_id'], 'firm:01' if arm == 'shock' else 'firm:00')
+                final_book = final.data['economic_runtime']
+                audited = audit_institutions(final)['economy']
+                self.assertEqual((audited['security_final_units'], audited['security_volume_units']), (4, 1))
+                self.assertEqual(audited['goods_final_units'], sum(final_book['goods'].values()))
+                wage, = [e for e in final_book['journal'] if e['tx_id'] == work['payment_tx_id']]
+                self.assertEqual((wage['payload']['employer_id'], wage['details']['paid_minor']), (work['employer_id'], 12))
+                fiscal, = [e for e in final_book['journal'] if e['kind'] == 'fiscal' and e['tick'] == 4]
+                response = fiscal['details']['consumption_response']
+                self.assertEqual((response['consumed_units'], response['triggered']), (sales, arm == 'shock'))
+                self.assertEqual(fiscal['details']['transfers_paid_minor'], 2 if arm == 'shock' else 0)
+                self.assertEqual(set(response['source_tx_ids']), {
+                    e['tx_id'] for e in final_book['journal'] if e['kind'] == 'consumption' and e['tick'] == 3})
+
+    async def test_joint_security_rolls_back_and_replays_without_a_second_wallet(self):
+        config = read_json(SECURITY_FEEDBACK_FIXTURE)
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            world, store = economic_run.create_run(config, root / 'interrupted')
+            await world.step()
+            before = world.snapshot
+
+            def fail_before_marker(point):
+                if point == 'before_marker':
+                    raise OSError('failed joint period before marker')
+
+            store.fault_hook = fail_before_marker
+            with self.assertRaisesRegex(OSError, 'failed joint period before marker'):
+                await world.step()
+            self.assertEqual(world.snapshot, before)
+            self.assertEqual(store.markers()[-1].tick, 1)
+            self.assertIsNone(world.participants[0].security_mark)
+            self.assertEqual(world.participants[0].security_units('firm:01'), 0)
+            resumed = await economic_run.resume_run(root / 'interrupted')
+            clean = await economic_run.run_new(config, root / 'clean')
+            self.assertEqual(resumed['state_hash'], clean['state_hash'])
+            loaded, _, _ = economic_run.open_run(root / 'interrupted')
+            committed = loaded.snapshot
+            changed = committed.model_dump(mode='json')
+            changed['data']['economic_runtime']['security_units']['firm:01'] += 1
+            with self.assertRaisesRegex(ValueError, 'Security quantities differ from journal reconstruction'):
+                loaded.restore_snapshot(type(committed).model_validate(changed))
+            self.assertEqual(loaded.snapshot, committed)
+            replay = await economic_run.replay_run(root / 'interrupted', destination=root / 'verification')
+            self.assertEqual((replay['status'], replay['compared_ticks'], replay['state_hash']),
+                             ('matched', 5, clean['state_hash']))
+            self.assertFalse(replay['applied_deltas_to_execution'])
+
+    async def test_joint_security_no_trade_still_marks_wealth_without_cash_postings(self):
+        config = read_json(SECURITY_FEEDBACK_FIXTURE)
+        config['initial_firm_cash_minor'] = 95
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / 'no-fill'
+            await economic_run.run_new(config, root, until=3)
+            store = CommitStore(root)
+            _, impact = store.load(2)
+            period = impact.data['closed_economy']['security_session']
+            self.assertEqual((period['close_minor'], period['fill_count'], period['journal_tx_ids']), (None, 0, []))
+            receipt, = [r for r in impact.receipts if r.unit == 'security_units' and r.actor_id == 'firm:01']
+            self.assertEqual((receipt.status, receipt.reason_codes), ('rejected', ['insufficient_security_cash']))
+            marker, current = store.load(3)
+            book = current.data['economic_runtime']
+            self.assertEqual(book['security_units']['firm:01'], 0)
+            mark, = [e for e in book['journal'] if e['kind'] == 'security_mark']
+            self.assertFalse(mark['postings'])
+            obs = next(o for o in store.observation_rows(marker) if o.actor_id == 'household:0000')
+            fact, = [f for f in obs.market_view if f.value.get('kind') == 'security_wealth']
+            self.assertEqual((fact.value['market_value_minor'], fact.value['market_value_change_minor']), (10, -90))
+
     async def test_short_shift_branches_share_state_and_only_treatment_executes(self):
         config = {'households': 4, 'ticks': 3, 'fault_tick': None, 'archive_observations': True,
                   'fiscal': {'announced_tick': 2, 'effective_tick': 3, 'initial_cash_minor': 30, 'audience': [1],

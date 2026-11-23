@@ -244,10 +244,11 @@ class RuntimeCompatibilityTests(unittest.IsolatedAsyncioTestCase):
             world.restore_snapshot(build_fixture(3).snapshot)
         with self.assertRaises(TypeError):
             WORLD_CODECS[5] = WORLD_CODECS[4]
-        for versions in ({"new_arbitrary_module": 1}, {"economic_runtime": 3}, {"economic_runtime": True}):
+        for versions in ({"new_arbitrary_module": 1}, {"economic_runtime": 4}, {"economic_runtime": True}):
             with self.assertRaises(ValueError):
                 validate_versions(versions)
         validate_versions({"economic_runtime": 1, "portfolio_ledger": 3})
+        validate_versions({"economic_runtime": 3})
 
     async def test_snapshot_rejection_precedes_store_creation(self):
         with tempfile.TemporaryDirectory() as folder:

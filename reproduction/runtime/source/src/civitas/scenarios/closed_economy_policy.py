@@ -4,7 +4,7 @@ from fractions import Fraction
 from civitas.contracts.decisions import HoldIntent, MessageDraft
 from civitas.contracts.economic import (ConsumeIntent, CooperationIntent, CooperationPartnerProposal, EconomicCommand,
     EconomicDecisionBundle, LaborAcceptIntent, LaborApplyIntent, NetworkProposal, NetworkWithdrawal,
-    CreditApplicationIntent, PurchaseIntent, QuoteIntent, WithdrawDepositIntent)
+    CreditApplicationIntent, PurchaseIntent, QuoteIntent, SecurityOrderIntent, WithdrawDepositIntent)
 from civitas.core.rng import DrawAddress
 from .closed_economy_demand import consumption_disclosure, consumption_message_id, demand_comparison
 from .closed_economy_cooperation import trial_partner_result
@@ -65,6 +65,12 @@ class ClosedEconomyPolicy:
         intents, drafts, patch = [], [], {}
         network_proposals = []
         prefix = f"intent:{tick}:{actor}"
+        if self.config.security_feedback is not None:
+            order = next((f for f in observation.market_view if f.value.get("kind") == "security_order_terms"), None)
+            if order is not None:
+                terms = {key: value for key, value in order.value.items() if key != "kind"}
+                intents.append(SecurityOrderIntent(intent_id=prefix + ":security", **terms))
+                evidence.add(order.fact_id)
         if profile["kind"] == "household_preferences":
             if self.config.banking and self.config.banking.credit_offer and self.capabilities.is_enabled("apply_credit"):
                 offer = next((f for f in observation.market_view if f.value.get("kind") == "credit_offer"), None)
@@ -150,6 +156,14 @@ class ClosedEconomyPolicy:
                 reserve += precaution
                 evidence.add(announcement.fact_id)
                 patch["fiscal_precaution"] = {"reserve_minor": precaution, "evidence_id": announcement.fact_id}
+            if self.config.security_feedback is not None:
+                wealth = next((f for f in observation.market_view if f.value.get("kind") == "security_wealth"), None)
+                if wealth is not None:
+                    reserve_increase = max(0, -wealth.value["market_value_change_minor"])
+                    reserve += reserve_increase
+                    evidence.add(wealth.fact_id)
+                    patch["security_wealth_response"] = {"reserve_increase_minor": reserve_increase,
+                                                         "evidence_id": wealth.fact_id}
             budget = household_budget_minor(account["available_cash_minor"], reserve, profile["basket_share_bps"])
             scores, used = appraise_social(observation, self.config, None if integrate_peer else set())
             ranked_scores = scores if supplier_scores is None else supplier_scores(scores)

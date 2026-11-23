@@ -63,7 +63,8 @@ def create_run(config, destination, *, run_id=None, terminal_tick=None,
                 'data_origin': 'synthetic_closed_economy', 'provider_mode': config.cognition_mode,
                 **({'external_api_calls': 0} if config.cognition_mode != 'live' else {}),
                 **({'observation_archive':config.observation_archive_format} if config.archive_observations else {}),
-                'economic_model': ('single_prefunded_security_session' if config.securities is not None else
+                'economic_model': ('joint_prefunded_security_and_institutions' if config.security_feedback is not None else
+                    'single_prefunded_security_session' if config.securities is not None else
                     config.banking.credit_creation_mode if config.banking is not None else 'single_prefunded_settlement_token'),
                 **({'terminal_tick': terminal_tick} if terminal_tick is not None else {})}
     runtime = None

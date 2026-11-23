@@ -76,6 +76,9 @@ class CooperationIntent(Record):
     action: CooperationAction
 
 
+SECURITY_ASSET = "security:A"
+
+
 class SecurityOrderIntent(Record):
     kind: Literal["security_order"] = "security_order"
     intent_id: Id
@@ -321,7 +324,8 @@ AccountCode = Literal["cash", "inventory", "work_in_progress", "wage_receivable"
                       "bank_reserve", "deposit_asset", "loan_asset", "interest_asset", "interest_expense",
                       "credit_loss", "payment_expense", "deposit_loss", "guarantee_expense",
                       "reserve_payable", "deposit_payable", "loan_payable", "interest_payable",
-                      "interest_income", "loan_allowance", "credit_recovery", "payment_income", "debt_release_income"]
+                      "interest_income", "loan_allowance", "credit_recovery", "payment_income", "debt_release_income",
+                      "security_inventory", "security_disposal_cost", "security_sale_proceeds"]
 
 
 class EconomicPosting(Record):
@@ -361,7 +365,7 @@ class EconomicJournalEntry(Record):
     kind: Literal["opening", "wage_accrual", "wage_payment", "production",
                   "purchase", "delivery_failure", "consumption", "payroll_reserve", "payroll_release", "link_fee",
                   "labor_switch_fee", "cooperation_settlement", "fiscal", "bank", "bank_withdrawal",
-                  "credit_application", "security_trade"]
+                  "credit_application", "security_trade", "security_mark"]
     tick: NonNegative
     payload_hash: Digest
     payload: dict[str, Any]
@@ -393,9 +397,10 @@ class PayrollCashReservation(PayrollInstallment):
 
 class EconomicRuntimeState(Record):
     """Strict participant envelope; balances and goods are verified journal projections."""
-    schema_version: Literal[1, 2] = 1
+    schema_version: Literal[1, 2, 3] = 1
     state_id: Literal["economic_runtime"] = "economic_runtime"
-    backend: Literal["fixedpoint_m0_economy", "fixedpoint_institutional_economy"] = "fixedpoint_m0_economy"
+    backend: Literal["fixedpoint_m0_economy", "fixedpoint_institutional_economy",
+                     "fixedpoint_joint_security_economy"] = "fixedpoint_m0_economy"
     institution_config_hash: Digest | None = Field(default=None, exclude_if=lambda value: value is None)
     bank_positions: dict[str, Any] | None = Field(default=None, exclude_if=lambda value: value is None)
     currency_id: Id
@@ -409,6 +414,7 @@ class EconomicRuntimeState(Record):
     world_version: NonNegative
     balances: dict[Id, dict[AccountCode, SignedAmount]]
     goods: dict[Id, Amount]
+    security_units: dict[Id, Amount] | None = Field(default=None, exclude_if=lambda value: value is None)
     wage_obligations: list[WageObligation]
     journal: list[EconomicJournalEntry]
     quotes: list[GoodsQuote]

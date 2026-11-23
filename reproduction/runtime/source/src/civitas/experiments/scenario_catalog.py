@@ -60,6 +60,7 @@ class ScenarioSuite(Record):
             raise ValueError('A complete registered suite requires A–E')
         cfg = {scene: row.config for scene,row in self.scenarios.items()}
         if (not cfg['A'].securities or not cfg['B'].banking or not cfg['C'].demand or not cfg['C'].fiscal
+                or any(c.security_feedback is not None for c in cfg.values())
                 or not cfg['C'].labor_transfer or not cfg['E'].fiscal or any(c.cognition_mode!='rule' for c in cfg.values())
                 or any(cfg[s].stopping_hazard_bps is not None for s in ('A','B','C','E'))):
             raise ValueError('Registered configurations do not select their declared domains')

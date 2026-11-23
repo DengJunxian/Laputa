@@ -1,6 +1,8 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from civitas.cli_v4 import main
 from civitas.experiments.scenario_catalog import CATALOG, ScenarioSuite, inference, run_suite
 from civitas.storage.commit_store import atomic_json, read_json
@@ -23,6 +25,13 @@ def test_registered_security_arms_complete_with_explicit_no_trade_boundary():
         assert report['cases'][1]['rows']['unfunded']['drawdown'] is None
         assert all(arm['replay']['status'] == 'matched'
                    for result in report['cases'] for arm in result['rows'].values())
+
+
+def test_joint_security_world_cannot_replace_a_registered_catalog_domain():
+    raw = read_json(SPEC)
+    raw['scenarios']['A']['config'] = read_json(SPEC.parent / 'closed-economy-security-feedback.json')
+    with pytest.raises(ValueError, match='select their declared domains'):
+        ScenarioSuite.model_validate(raw)
 
 
 def test_unobservable_worlds_remain_in_the_denominator():

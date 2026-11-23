@@ -29,7 +29,7 @@ PARTICIPANT_VERSIONS = MappingProxyType({
     'portfolio_ledger': (3,),
     'legacy_society': (1,),
     'society_traces': (1,),
-    'economic_runtime': (1, 2),
+    'economic_runtime': (1, 2, 3),
 })
 
 

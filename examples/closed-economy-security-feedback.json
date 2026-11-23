@@ -1,0 +1,54 @@
+{
+  "root_seed": 7,
+  "ticks": 5,
+  "households": 8,
+  "firms": 2,
+  "fault_tick": null,
+  "archive_observations": true,
+  "cash_jitter_minor": 0,
+  "firm_price_gap_minor": 10,
+  "target_units_min": 2,
+  "target_units_max": 2,
+  "basket_share_min_bps": 10000,
+  "basket_share_max_bps": 10000,
+  "securities": {
+    "shock_tick": 2,
+    "initial_price_minor": 100,
+    "fundamental_drop_minor": 90
+  },
+  "security_feedback": {
+    "holder_indices": [0, 2, 4, 6],
+    "shock_enabled": true,
+    "wealth_observed": true
+  },
+  "labor_transfer": {
+    "worker_index": 1,
+    "employer_index": 0,
+    "offer_tick": 4,
+    "duration_ticks": 1,
+    "min_previous_sales_units": 13
+  },
+  "banking": {
+    "credit_creation_mode": "bank_credit_creation",
+    "initial_bank_cash": {"bank:a": 9, "bank:b": 3},
+    "credit_offer": {
+      "kind": "approve",
+      "operation_id": "joint-credit",
+      "tick": 2,
+      "bank": "bank:a",
+      "actor": "household:0003",
+      "amount_minor": 12,
+      "installments": 2
+    }
+  },
+  "fiscal": {
+    "initial_cash_minor": 30,
+    "announced_tick": 2,
+    "effective_tick": 4,
+    "audience": [],
+    "brackets": [{"start_minor": 0, "rate_bps": 2000}],
+    "transfer_recipients": [1],
+    "transfer_minor": 2,
+    "consumption_floor_units": 13
+  }
+}
