@@ -1,6 +1,6 @@
 # SCOPE_LOCK / Laputa MCRP
 
-**Stage 03 base** `729b2e24f95bcd51e037244b5b20c18a9c674008` · **Current stage** 03 · **Branch** `feature/laputa-convergence`
+**Stage 04 base** `dae266ca5e6d47613b40ba08b0d75c533582d9c4` · **Current stage** 04 · **Branch** `feature/laputa-convergence`
 
 **One target behavior**
 
@@ -30,6 +30,6 @@
 
 [积压项](BACKLOG.md) 为 LATER。本轮范围包括本地提交；远端推送、公开发布、修改许可和付费模型调用需另行授权。
 
-**Stage 03 slice** · 沿用阶段 02 的 root 7、5 期联合配置。两个家庭和一家企业有可登记的策略槽，一户演示行为预算，另一户和企业演示结构化选择。纯规则、行为、固定归档三臂使用相同经济执行合同，核对 t+1 反馈、单一 MemoryBook、现金/库存、预算和回放。真实模型只接已核验清单和既有 Provider，真实 E2E 为 NOT_EXECUTED。阶段 04 的参考点损失权重单独验收。
+**Stage 04 slice** · 只做 PPT 第 1 页对应的 M1。保留阶段 02 的 root 7、5 期、证券标价冲击 90 和人口。预先固定两组对照，`lambda_bps=10000` 对 `20000` 均开启披露，`20000` 再配对关闭披露。加权损失进入原有预算，披露只复用既有消费回执与通信。核对可见时序、去重、法定债权、实际行动和独立回放，保留零差异。
 
-**Result** · PASS，见 [阶段 03 实测](STAGE_03.md)。
+**Result** · PASS，见 [阶段 04 机制与对照](STAGE_04.md)。

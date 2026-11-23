@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "lambda_bps": 20000,
+  "peer_disclosure": true
+}

@@ -196,6 +196,12 @@ class SecurityFeedbackSettings(Record):
     wealth_observed: bool = True
 
 
+class ReferenceLossSettings(Record):
+    schema_version: Literal[1] = 1
+    lambda_bps: Annotated[int, Field(ge=10000)] = 10000
+    peer_disclosure: bool = True
+
+
 JOINT_CHOICE_TASK = 'joint_policy_choice'
 
 
@@ -253,6 +259,7 @@ class ClosedEconomyConfig(Record):
     fiscal: FiscalPolicy | None = Field(default=None, exclude_if=lambda value: value is None)
     securities: SecurityMarketSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     security_feedback: SecurityFeedbackSettings | None = Field(default=None, exclude_if=lambda value: value is None)
+    reference_loss: ReferenceLossSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     joint_policy: JointPolicySettings | None = Field(default=None, exclude_if=lambda value: value is None)
     demand: ConsumptionDemandSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     population_input: HouseholdPopulation | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -310,6 +317,14 @@ class ClosedEconomyConfig(Record):
                 for offset in range(self.network_neighbors)]
 
     @property
+    def consumption_peer_uplift(self):
+        if self.demand is not None:
+            return self.demand.peer_uplift_units
+        if self.reference_loss is not None and self.reference_loss.peer_disclosure and self.social_mode != "none":
+            return 1
+        return None
+
+    @property
     def structured_sources(self):
         sources = {settings.source for settings in (
             self.supplier_cognition, self.withdrawal_cognition, self.labor_cognition,
@@ -358,6 +373,8 @@ class ClosedEconomyConfig(Record):
     def compatible_configuration(self):
         if not self.archive_observations and self.observation_archive_format != "observe.v1":
             raise ValueError("An indexed observation format requires observation archiving")
+        if self.reference_loss is not None and self.security_feedback is None:
+            raise ValueError("Reference loss requires the joint economy's security wealth facts")
         if self.joint_policy is not None:
             policy = self.joint_policy
             if self.security_feedback is None or not self.archive_observations or any((

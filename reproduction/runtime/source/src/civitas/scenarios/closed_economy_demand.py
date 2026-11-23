@@ -21,7 +21,7 @@ def consumption_source(body, receipts, sender, sent_tick):
     return None
 
 
-def demand_comparison(observation, settings):
+def demand_comparison(observation, peer_uplift_units):
     window = observation.visible_until.tick - 2
     own = sum(f.value["executed_quantity"] for f in observation.private_memory_refs
               if f.value.get("outcome") == "consumed" and f.value.get("tick") == window)
@@ -32,7 +32,7 @@ def demand_comparison(observation, settings):
             peers[message.sender_id] += message.body["units"]
             refs.append(message.message_id)
     max_peer = max(peers.values(), default=0)
-    uplift = settings.peer_uplift_units if max_peer > own else 0
+    uplift = peer_uplift_units if max_peer > own else 0
     return {"consumption_source_tick": window if refs else None,
             "prior_own_units": own, "max_peer_units": max_peer, "peer_uplift_units": uplift,
             "consumption_message_ids": sorted(refs)}

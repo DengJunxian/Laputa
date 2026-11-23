@@ -342,7 +342,7 @@ class ClosedEconomyObserver(ObservationBuilder):
                 continue
             if self.config.introductions and message.body.get("kind") == INTRODUCTION_KIND:
                 offered.append(message)
-            elif (self.config.demand is not None and message.body.get("kind") == DEMAND_KIND
+            elif (self.config.consumption_peer_uplift is not None and message.body.get("kind") == DEMAND_KIND
                   and message.created_at.tick == snapshot.tick-1
                   and consumption_source(message.body, receipts, message.sender_id, message.created_at.tick) is not None
                   and message.message_id == consumption_message_id(message.sender_id, actor_id,
@@ -442,6 +442,7 @@ class ClosedEconomyObserver(ObservationBuilder):
         labor_enabled = transfer and transfer.outcome_evidence
         performance_enabled = labor_enabled and transfer.performance_trust
         rehire = transfer.rehire_at(snapshot.tick) if transfer is not None else None
+        peer_uplift = self.config.consumption_peer_uplift
         if labor_enabled:
             labor_consumed = {(row["actor_id"], row["target_id"], row["root_claim_id"])
                               for row in chain(state.trace, trace) if row["kind"] == "labor_outcome_consumption"}
@@ -484,7 +485,7 @@ class ClosedEconomyObserver(ObservationBuilder):
                     continue
                 if draft.body.get("kind") == DEMAND_KIND:
                     source = consumption_source(draft.body, receipts, actor, snapshot.tick)
-                    if (self.config.demand is None or source is None or draft.recipient_id not in neighbors.get(actor, ())
+                    if (peer_uplift is None or source is None or draft.recipient_id not in neighbors.get(actor, ())
                             or "memory:" + source.command_id not in bundle.evidence_ids
                             or draft.message_id != consumption_message_id(actor, draft.recipient_id,
                                                                            draft.body["root_claim_id"])):
@@ -537,8 +538,8 @@ class ClosedEconomyObserver(ObservationBuilder):
                                                            snapshot.memories, partner_trust, trace)
             choice = bundle.belief_patch.get("closed_choice", {})
             demand_used = set()
-            if self.config.demand is not None:
-                expected = demand_comparison(observation, self.config.demand)
+            if peer_uplift is not None:
+                expected = demand_comparison(observation, peer_uplift)
                 profile = next(f for f in observation.market_view if f.value.get("kind") == "household_preferences")
                 if expected["peer_uplift_units"]:
                     demand_used.update(expected["consumption_message_ids"])

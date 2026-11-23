@@ -160,11 +160,19 @@ class ClosedEconomyPolicy:
             if self.config.security_feedback is not None:
                 wealth = next((f for f in observation.market_view if f.value.get("kind") == "security_wealth"), None)
                 if wealth is not None:
-                    reserve_increase = max(0, -wealth.value["market_value_change_minor"])
-                    reserve += reserve_increase
+                    change = wealth.value["market_value_change_minor"]
+                    loss = max(0, -change)
+                    response = {"reserve_increase_minor": loss, "evidence_id": wealth.fact_id}
+                    if self.config.reference_loss is not None:
+                        weight = self.config.reference_loss.lambda_bps
+                        value = wealth.value["market_value_minor"]
+                        response.update(mechanism_id="reference_loss_v1", lambda_bps=weight,
+                                        reference_value_minor=value - change, market_value_minor=value,
+                                        loss_minor=loss, reserve_increase_minor=loss * weight // 10000,
+                                        mark_tx_id=wealth.value["mark_tx_id"])
+                    reserve += response["reserve_increase_minor"]
                     evidence.add(wealth.fact_id)
-                    patch["security_wealth_response"] = {"reserve_increase_minor": reserve_increase,
-                                                         "evidence_id": wealth.fact_id}
+                    patch["security_wealth_response"] = response
             budget = household_budget_minor(account["available_cash_minor"], reserve, profile["basket_share_bps"])
             scores, used = appraise_social(observation, self.config, None if integrate_peer else set())
             ranked_scores = scores if supplier_scores is None else supplier_scores(scores)
@@ -185,8 +193,9 @@ class ClosedEconomyPolicy:
             own_units = account["goods_units"]
             target = profile["target_units"]
             demand = {}
-            if self.config.demand is not None:
-                demand = demand_comparison(observation, self.config.demand)
+            peer_uplift = self.config.consumption_peer_uplift
+            if peer_uplift is not None:
+                demand = demand_comparison(observation, peer_uplift)
                 target += demand["peer_uplift_units"]
                 if demand["peer_uplift_units"]:
                     evidence.update(demand["consumption_message_ids"])
