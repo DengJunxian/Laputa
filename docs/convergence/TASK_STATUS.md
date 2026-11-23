@@ -1,0 +1,11 @@
+# Laputa MCRP 阶段状态
+
+| 阶段 | 优先级 | 状态 | 基线 / 证据 | 下一动作 |
+| --- | --- | --- | --- | --- |
+| 01 基线与 PPT | P0 | PASS | `e40f1dd49f415685bb05d6ca9d3632fe340cab45`；[基线实测](BASELINE_TESTS.md)、[能力事实](EXISTING_CAPABILITIES.md)、[六页机制卡](PPT_MECHANISM_CARDS.md) | 本阶段完成。 |
+| 02 联合世界 | P0 | NOT_STARTED | [范围冻结](SCOPE_LOCK.md)、[首个红测及文件入口](EXISTING_CAPABILITIES.md#阶段-02-精确开发入口) | 用户指示后只启动 02。 |
+| 03 Agent 策略 | P1 | NOT_STARTED | 使用既有 Policy 与动作边界 | 02 通过后按阶段提示词启动。 |
+| 04 PPT 机制 | P1 | NOT_STARTED | M1 参考点损失权重 | 03 通过后按阶段提示词启动。 |
+| 05 实验 | P1 | NOT_STARTED | 合成配对 pilot 上限 8 根 | 04 通过后按阶段提示词启动。 |
+| 06 Workbench/CI | P1 | NOT_STARTED | 现有 Workbench 与本地项目安装 | 05 通过后按阶段提示词启动。 |
+| 07 终验 | P1 | NOT_STARTED | 独立执行与可检查证据 | 06 通过后按阶段提示词启动。 |
