@@ -88,7 +88,10 @@ def build_research_index(root, destination, *, tick, commit, state_only=False):
     state = snapshot.data['economic_runtime']
     rows = [{'account_id': actor, 'cash_minor': balance['cash'], 'goods_units': state['goods'][actor],
              'wage_receivable_minor': balance.get('wage_receivable', 0),
-             'deposit_asset_minor': balance.get('deposit_asset', 0), 'bank_reserve_minor': balance.get('bank_reserve', 0)}
+             'deposit_asset_minor': balance.get('deposit_asset', 0), 'bank_reserve_minor': balance.get('bank_reserve', 0),
+             **({'security_units': state['security_units'].get(actor, 0),
+                 'loan_payable_minor': -balance.get('loan_payable', 0)}
+                if store.identity.config.get('security_feedback') else {})}
             for actor, balance in sorted(state['balances'].items())]
     with publish_directory(destination) as staging:
         staging.chmod(0o700)

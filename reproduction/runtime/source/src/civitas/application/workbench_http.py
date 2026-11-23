@@ -169,6 +169,21 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             return json_bytes(_browser_integers(view)), 'application/json', None
         if registration and route != '/api/view':
             raise PermissionError('Use the audited comparison routes in this comparison workspace')
+        if route in ('/api/timeline', '/api/joint-pilot', '/api/joint-pilot-download'):
+            if scope is not None:
+                raise PermissionError('Joint world aggregates require researcher access')
+            if route == '/api/timeline':
+                query = parse_qs(url.query, keep_blank_values=True, max_num_fields=1)
+                if set(query) != {'job'} or len(query['job']) != 1:
+                    raise ValueError('Choose one joint world run')
+                data = workbench.timeline(job_key(query['job'][0]))
+            else:
+                if url.query:
+                    raise ValueError('This archive exposes one registered comparison')
+                data = workbench.pilot_comparison()
+                if route == '/api/joint-pilot-download':
+                    return json_bytes(data), 'application/json', 'ecosim-joint-shock-pilot.json'
+            return json_bytes(_browser_integers(data)), 'application/json', None
         if route == '/api/research-page':
             if scope is not None:
                 raise PermissionError('Research account pages require researcher access')
@@ -201,7 +216,7 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
             if key != scope[0] or actor not in (None, scope[1]):
                 raise PermissionError('This capability only grants the registered run and actor')
             actor = scope[1]
-        data = workbench.inspect(key, tick, actor)
+        data = workbench.inspect(key, tick, actor, include_actor_settlement=scope is None)
         if route == '/api/download':
             if data['status'] != 'available':
                 raise FileNotFoundError('No export is available for this period')
@@ -216,11 +231,12 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
 
 
 def serve(root, template, port, *, supplier_preview=None, choice_previews=(), withdrawal_template=None,
-          labor_template=None, research_preview=None):
+          labor_template=None, research_preview=None, joint_template=None, joint_pilot=None):
     with ExitStack() as stack:
         workbench = stack.enter_context(open_workspace(
             root, template, supplier_preview=supplier_preview, choice_previews=choice_previews,
-            withdrawal_template=withdrawal_template, labor_template=labor_template))
+            withdrawal_template=withdrawal_template, labor_template=labor_template,
+            joint_template=joint_template, joint_pilot=joint_pilot))
         previews = {}
         for kind, config in (research_preview or {}).items():
             path = root/kind

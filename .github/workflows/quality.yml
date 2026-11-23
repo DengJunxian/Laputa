@@ -1,0 +1,48 @@
+name: Research quality gate
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  offline-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      OPENAI_API_KEY: ''
+      DEEPSEEK_API_KEY: ''
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Install and check dependencies
+        run: |
+          python -m pip install .
+          python -m pip install '.[research,population,data]' 'pytest==9.2.0'
+          python -m pip check
+      - name: Check installed assets and notices
+        run: |
+          python - <<'PY'
+          from importlib.metadata import distribution
+          from pathlib import Path
+          import civitas
+          from civitas.application.workbench_http import ASSETS
+
+          assert not Path(civitas.__file__).resolve().is_relative_to(Path.cwd() / 'reproduction')
+          assert all((ASSETS / name).is_file() for name in ('index.html', 'workbench.js', 'workbench.css'))
+          files = distribution('ecosim-research').files
+          notices = {p.name for p in files if 'licenses' in p.parts and p.locate().is_file()}
+          assert {'THIRD_PARTY_NOTICES.md', 'EconSimulacra-MIT.txt', 'Manyworld-MIT.txt',
+                  'ai-economist-BSD-3-Clause.txt', 'ipfn-MIT.txt'} <= notices
+          PY
+      - name: Run the offline regression gate
+        run: |
+          python -m pytest -q -ra tests/test_local_workbench.py tests/test_joint_shock_pilot.py \
+            tests/test_rp06_calibration.py tests/test_reference_loss.py tests/test_wp10_demand.py \
+            tests/test_joint_policy.py tests/test_joint_world.py tests/test_network_withdrawal.py \
+            tests/test_closed_economy.py tests/test_wp10_security.py tests/test_v4_runtime.py \
+            tests/test_economic_runner.py tests/test_fiscal_policy.py tests/test_wp10_catalog.py

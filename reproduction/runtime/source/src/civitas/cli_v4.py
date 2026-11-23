@@ -48,6 +48,7 @@ def main(argv=None):
     workbench_inputs.add_argument('--choice-preview', type=Path, nargs='+', default=(),
                                   help='open an audited withdrawal and/or labor comparison')
     workbench.add_argument('--port', type=int, default=0)
+    workbench.add_argument('--joint-pilot', type=Path, help='read-only archive from the registered joint shock pilot')
     replay = commands.add_parser('replay', help='re-execute and compare every committed state')
     replay.add_argument('run', type=Path)
     replay.add_argument('--output', type=Path, required=True)
@@ -230,12 +231,19 @@ def main(argv=None):
             'fault_tick': None,
         }
         comparison_paths = {'withdrawal': args.withdrawal_template, 'labor': args.labor_template}
+        joint_template = None
         if args.research_preview:
             template = read_json(args.research_preview/'closed-economy-joint-world.json')
             if not isinstance(template, dict):
                 raise ValueError('The joint-world template must be a world configuration object')
             # The preview schedules the shift from the period-19 parent commit.
             template.pop('labor_income_shock', None)
+            joint_path = args.research_preview/'closed-economy-security-feedback.json'
+            if joint_path.is_file():
+                joint_template = read_json(joint_path)
+                reference_path = args.research_preview/'reference-loss-settings.json'
+                if reference_path.is_file():
+                    joint_template['reference_loss'] = read_json(reference_path)
             comparison_paths = {
                 'withdrawal': args.research_preview/'closed-economy-bank-notice.json',
                 'labor': args.research_preview/'closed-economy-labor-choice-preview.json',
@@ -250,7 +258,8 @@ def main(argv=None):
         launch_options = ({'research_preview': comparisons} if args.research_preview else
                           {kind+'_template': raw for kind, raw in comparisons.items()})
         serve(args.workspace, template, args.port, supplier_preview=args.supplier_preview,
-              choice_previews=args.choice_preview, **launch_options)
+              choice_previews=args.choice_preview, joint_template=joint_template, joint_pilot=args.joint_pilot,
+              **launch_options)
         return 0
     elif args.command == 'replay':
         result = asyncio.run(economic_run.replay_run(args.run, destination=args.output))

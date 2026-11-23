@@ -10,8 +10,9 @@ import sqlite3
 from threading import RLock
 
 from civitas.application import economic_run
-from civitas.application.comparison_inspection import _metrics
-from civitas.application.inspection import _cursor, _frame, _indexed_agent_frame, _inspection_document
+from civitas.application.comparison_inspection import _metrics, joint_pilot_comparison, joint_timeline
+from civitas.application.inspection import (_cursor, _frame, _indexed_agent_frame, _inspection_document,
+                                            joint_actor_settlement, joint_relation_layers)
 from civitas.application.research_cursor import build_research_index, research_page
 from civitas.application.workbench_choices import ChoiceComparisons
 from civitas.application.choice_registration import ChoiceRegistration, REGISTRATION_TEMPLATES
@@ -27,7 +28,8 @@ from civitas.storage.history import parent_reference, publish_directory
 
 ACTIVE = {'running', 'pausing', 'cancelling'}
 RESUMABLE = {'paused', 'interrupted', 'failed'}
-COMMAND_FIELDS = {'freeze': {'label', 'config'}, 'freeze-intervention': {'kind', 'side'}, 'fork': {'label', 'job', 'tick', 'intervention'},
+COMMAND_FIELDS = {'freeze': {'label', 'config'}, 'freeze-joint-template': {'expected_hash'},
+                  'freeze-intervention': {'kind', 'side'}, 'fork': {'label', 'job', 'tick', 'intervention'},
                   'start': {'job', 'until'}, 'resume': {'job', 'until'},
                   'pause': {'job'}, 'cancel': {'job'}}
 
@@ -43,12 +45,14 @@ def job_key(value):
 
 
 @contextmanager
-def open_workspace(root, template, *, supplier_preview=None, choice_previews=(), withdrawal_template=None, labor_template=None):
+def open_workspace(root, template, *, supplier_preview=None, choice_previews=(), withdrawal_template=None,
+                   labor_template=None, joint_template=None, joint_pilot=None):
     root = Path(root).resolve()
     root.mkdir(mode=0o700, parents=True, exist_ok=True)
     with run_lock(root):
         workbench = Workbench(root, template, supplier_preview=supplier_preview, choice_previews=choice_previews,
-                              withdrawal_template=withdrawal_template, labor_template=labor_template)
+                              withdrawal_template=withdrawal_template, labor_template=labor_template,
+                              joint_template=joint_template, joint_pilot=joint_pilot)
         try:
             yield workbench
         finally:
@@ -56,7 +60,8 @@ def open_workspace(root, template, *, supplier_preview=None, choice_previews=(),
 
 
 class Workbench:
-    def __init__(self, root, template, *, supplier_preview=None, choice_previews=(), withdrawal_template=None, labor_template=None):
+    def __init__(self, root, template, *, supplier_preview=None, choice_previews=(), withdrawal_template=None,
+                 labor_template=None, joint_template=None, joint_pilot=None):
         self.jobs = root / 'jobs'
         self.runs = root / 'runs'
         self.research_indexes = root / 'research-index'
@@ -82,8 +87,18 @@ class Workbench:
         self.preview_hash = content_hash(self.preview[0]) if self.preview else None
         self.intervention_templates = catalog() if not (self.preview or self._choices or chosen) else []
         template = self.preview[0]['configs']['rule'] if self.preview else template
-        self.config(template)
+        config = self.config(template)
         self.template = json.dumps(template, ensure_ascii=False, indent=2)
+        self.joint_template = None
+        self.joint_config = None
+        self.joint_pilot = None
+        if not (self.preview or self._choices or chosen):
+            candidate = self.config(joint_template) if joint_template is not None else config
+            if candidate.security_feedback is not None and candidate.archive_observations:
+                self.joint_config = candidate.model_dump(mode='json')
+                self.joint_template = {'id': 'joint-security-feedback.v1', 'label': '联合世界 · 证券冲击',
+                                       'config_hash': content_hash(self.joint_config), 'ticks': candidate.ticks}
+            self.joint_pilot = joint_pilot
         jobs = [self.load(path.stem) for path in sorted(self.jobs.glob('*.json'))
                 if re.fullmatch(r'[a-f0-9]{32}', path.stem)]
         if (self.choices or chosen) and jobs:
@@ -160,6 +175,7 @@ class Workbench:
         jobs = [self.load(path.stem) for path in sorted(self.jobs.glob('*.json'))
                 if re.fullmatch(r'[a-f0-9]{32}', path.stem)]
         return {'role': 'researcher', 'template': self.template, 'supplier_preview': bool(self.preview),
+                'joint_template': self.joint_template, 'joint_pilot': self.joint_pilot is not None,
                 'intervention_templates': self.intervention_templates,
                 'jobs': [self.summary(job, detail=True) for job in sorted(jobs, key=lambda row: row['created_at'])]}
 
@@ -168,7 +184,7 @@ class Workbench:
         if not isinstance(action, str) or action not in COMMAND_FIELDS or set(raw) != COMMAND_FIELDS[action] | {'action', 'request_id'}:
             raise ValueError('Invalid workbench command or fields')
         request = job_key(raw['request_id'])
-        creating = action in ('freeze', 'fork', 'freeze-intervention')
+        creating = action in ('freeze', 'fork', 'freeze-intervention', 'freeze-joint-template')
         key = request if creating else job_key(raw['job'])
         digest = content_hash(raw)
         with self.lock:
@@ -197,11 +213,14 @@ class Workbench:
 
     def freeze(self, key, raw):
         design = None
+        joint = raw['action'] == 'freeze-joint-template'
+        if joint and (self.joint_template is None or raw['expected_hash'] != self.joint_template['config_hash']):
+            raise ValueError('Choose the registered joint world template and its full configuration hash')
         if raw['action'] == 'freeze-intervention':
             if not self.intervention_templates:
                 raise ValueError('Intervention templates require a normal research workspace')
             design = registration(raw['kind'], raw['side'])
-        label = design['label'] if design else raw['label']
+        label = (self.joint_template['label'] if joint else design['label'] if design else raw['label'])
         if not isinstance(label, str) or not label.strip() or len(label) > 80:
             raise ValueError('Choose a run name of 1–80 characters')
         parent = intervention = source_job = None
@@ -215,6 +234,8 @@ class Workbench:
                 self.run_path(source_job), tick=raw['tick'], intervention=raw['intervention'])
             parent = parent_reference(source, marker)
             config = self.config(source.identity.config)
+        elif joint:
+            config = self.config(self.joint_config)
         else:
             config = self.config(recipe(raw['kind'], raw['side']) if design else raw['config'])
         frozen = config.model_dump(mode='json')
@@ -225,6 +246,7 @@ class Workbench:
                 'parent': parent, 'source_job': source_job, 'intervention': intervention,
                 'until': None, 'requests': {}, 'error': None,
                 **({'supplier_preview_hash': self.preview_hash} if self.preview else {}),
+                **({'registered_template': self.joint_template['id']} if joint else {}),
                 **({'intervention_design': design} if design else {})}
 
     def move(self, job, raw):
@@ -310,7 +332,7 @@ class Workbench:
             job.update(status='paused' if state == 'checkpointed' else state, error=error)
             self.save(job)
 
-    def inspect(self, key, tick, actor):
+    def inspect(self, key, tick, actor, *, include_actor_settlement=False):
         if self.choices:
             return self.choices.inspect(key, tick, actor)
         job = self.load(key)
@@ -325,8 +347,14 @@ class Workbench:
         selected = next((marker for marker in records if marker.tick == tick), None)
         if selected is None:
             return {'status': 'uncommitted', 'tick': tick}
+        joint = bool(store.identity.config.get('security_feedback'))
         if actor is not None and store.observation_archive == 'observe.v2' and selected.kind == 'tick':
             view = _indexed_agent_frame(store, records, selected, actor)
+            if joint and include_actor_settlement:
+                marker, snapshot = store.load_state_chain(tick)
+                if marker != selected:
+                    raise ValueError('Settlement commit differs from the selected observation')
+                view['researcher_settlement'] = joint_actor_settlement(snapshot, actor)
             return {'status': 'available', **_inspection_document(store, 'agent', actor, [view])}
         marker, snapshot = store.load(tick)
         if self.preview and actor is None:
@@ -349,6 +377,8 @@ class Workbench:
                 return {'status': 'unrecorded_observe', 'tick': tick}
         audience = 'agent' if actor is not None else 'researcher'
         view = _frame(store, marker, snapshot, audience, actor)
+        if actor is not None and joint and include_actor_settlement:
+            view['researcher_settlement'] = joint_actor_settlement(snapshot, actor)
         if actor is None:
             view['comparison_metrics'] = _metrics(snapshot, tick)
             view['actors'] = snapshot.actors
@@ -358,13 +388,32 @@ class Workbench:
                 if view['intervention_evolution']['cursor'] != view['cursor']:
                     raise ValueError('Intervention evidence differs from the selected commit')
                 view['comparison_metrics'] = view['intervention_evolution']['metrics']
-            if SOCIAL_FIELD in snapshot.data:
+            if joint:
+                view['joint_world'] = True
+                view['relation_layers'] = joint_relation_layers(snapshot)
+            elif SOCIAL_FIELD in snapshot.data:
                 state = materialize_social(snapshot.data[SOCIAL_FIELD], tick)
                 view['communication_edges'] = [[actor, peer] for actor, peers in state.outgoing_contacts().items()
                                                for peer in peers]
             view['attempts'] = [{'status': row['status'], 'tick': row.get('tick')}
                                 for row in history(path) if row.get('tick') is not None and row['tick'] <= tick]
         return {'status': 'available', **_inspection_document(store, audience, actor, [view])}
+
+    def timeline(self, key):
+        if self.preview or self.choices:
+            raise PermissionError('Timelines require a normal research workspace')
+        job = self.load(key)
+        store = CommitStore(self.run_path(key))
+        self.verify_plan(job, store)
+        return {'audience': 'researcher', 'authority': False, 'periods': joint_timeline(store)}
+
+    def pilot_comparison(self):
+        if self.joint_pilot is None:
+            raise FileNotFoundError('No joint shock pilot archive was opened')
+        try:
+            return joint_pilot_comparison(self.joint_pilot)
+        except (KeyError, TypeError, IndexError) as exc:
+            raise ValueError('Invalid joint shock pilot archive metadata') from exc
 
     def research(self, key, tick, commit, page, *, build=False):
         if self.preview or self.choices:

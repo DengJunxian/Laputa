@@ -20,13 +20,15 @@ ecosim export runs/credit --tick 3 --output runs/credit-tick3.json
 
 The credit example has five periods. A registered household applies for 12 minor units at period 2, the bank funds it at period 3, and two installments repay the principal. Replay independently re-executes the saved inputs and reports matching committed states. Use fresh run directories and rerun with the same dependency versions for comparisons. The public snapshot has its own source identity.
 
-Launch the local workbench and open the address printed by the process. Its initial interface is in simplified Chinese. The default workspace offers four registered intervention templates. The research preview workspace opens a joint 32-household world and the labor and withdrawal comparisons. Use the researcher link printed by the process. Separate observer links grant read-only access to the selected actor.
+Launch the local workbench and open the address printed by the process. Its initial interface is in simplified Chinese. The default workspace offers four registered intervention templates. The research preview adds a registered 8-household joint security shock alongside the existing 32-household template and the labor and withdrawal comparisons. Use the researcher link printed by the process. Separate observer links grant read-only access to the selected actor's recorded observations.
 
 ```sh
 ecosim workbench --workspace runs/workbench
 # In a separate terminal or after stopping the first server:
 ecosim workbench --workspace runs/preview --research-preview examples
 ```
+
+In the research preview, freeze the joint security shock configuration and start the run. Open a committed period to inspect the timeline, relationship layers and accounts, or select one actor to see its archived observation and committed decisions and receipts. To open the registered pair from an existing [joint shock pilot](docs/convergence/STAGE_05.md), add `--joint-pilot /path/to/pilot` to the command. The workbench opens the two completed weight-2 arms for root 101 and can export the verified trajectories and differences as JSON.
 
 The examples and tests use simulated data. For a repeatable rule versus archived policy comparison with no provider credentials, the preview can generate and freeze its own synthetic responses. The following runs one documented template and independently audits the evidence:
 
@@ -60,4 +62,4 @@ Run the source regression with `python -m pip install '.[research,population]' p
 
 This is a source release of the reproducible research preview. The local acceptance used two archived purchase seats in a four-period, thousand-household example. The formal double-root, 100-period performance and replay gate and live model billing reconciliation remain pending. Bank and fiscal controls are registered templates. The securities experiment has its own prefunded liquidity. The original D1 confirmation retained natural stops and fell below its registered eligible-root minimum. Its inferential result remains unavailable.
 
-Component terms are recorded in [Third-party notices](THIRD_PARTY_NOTICES.md). A project-wide open-source license has not been assigned.
+Component terms are recorded in [Third-party notices](THIRD_PARTY_NOTICES.md). The repository has no project-wide `LICENSE`. Third-party permissions apply to their respective components. The public preview and build artifacts grant no general open-source permission to copy, modify, or redistribute Laputa's own code.

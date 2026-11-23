@@ -2,11 +2,12 @@
 from pathlib import Path
 
 from civitas.application.inspection import (
-    _frame, _inspection_document, _inspection_store, _inspection_ticks,
+    _cursor, _frame, _inspection_document, _inspection_store, _inspection_ticks,
 )
 from civitas.contracts.base import content_hash
 from civitas.economy.fiscal import TREASURY
-from civitas.storage.commit_store import json_bytes
+from civitas.experiments.registry import history
+from civitas.storage.commit_store import json_bytes, read_json
 from civitas.storage.history import publish_directory
 
 
@@ -24,7 +25,8 @@ def _metrics(snapshot, tick):
     fiscal = [e['details'] for e in journal if e['kind'] == 'fiscal']
     disclosures = [e['details'] for e in bank if 'disclosure_by_recipient_minor' in e['details']]
     support = [e['details'] for e in bank if e['payload']['action'] in ('support_disburse', 'support_collect')]
-    macro = snapshot.data.get('closed_economy', {}).get('last_macro', {})
+    scenario = snapshot.data.get('closed_economy', {})
+    macro = scenario.get('last_macro', {})
     has_bank = any(entity.startswith('bank:') for entity in balances)
     disbursed = sum(d.get('disbursed_minor', 0) for d in support)
     recovered = sum(d.get('bank_repaid_minor', 0) + d.get('guarantee_paid_minor', 0) for d in support)
@@ -46,6 +48,93 @@ def _metrics(snapshot, tick):
         ),
         'treasury_cash_minor': balances.get(TREASURY, {}).get('cash'),
     }
+
+
+def joint_timeline(store):
+    if not store.identity.config.get('security_feedback'):
+        raise ValueError('Select a joint security feedback world')
+    periods = []
+    for marker, snapshot in store.states():
+        if marker.tick == 0:
+            continue
+        economy = snapshot.data['economic_runtime']
+        scenario = snapshot.data['closed_economy']
+        session = scenario['security_session'] or {}
+        mark = next((entry for entry in economy['journal'] if entry['kind'] == 'security_mark'), None)
+        sales = scenario['last_macro']['sales_minor_by_seller']
+        macro = _metrics(snapshot, marker.tick)
+        periods.append({'cursor': _cursor(store, marker), 'metrics': {
+            'security_mark_minor': mark['payload']['price_minor'] if mark else None,
+            'realized_close_minor': session.get('close_minor') if session.get('tick') == marker.tick else None,
+            'consumed_units': macro['consumed_units'], 'firm_sales_minor': sum(sales.values()),
+            'wages_paid_minor': macro['wages_paid_minor'], 'bank_reserves_minor': macro['bank_reserves_minor'],
+            'treasury_cash_minor': macro['treasury_cash_minor'],
+        }, 'sales_by_firm_minor': sales})
+    return periods
+
+
+# The existing pilot's canonical protocol content binds this one registered contrast.
+JOINT_PILOT_PROTOCOL = '32ed1d383c8b42aa375152dd4b8ef908ccc471664909185dbf6c683b670a25b1'
+
+
+def joint_pilot_comparison(root):
+    root = Path(root).resolve(strict=True)
+
+    def local(relative):
+        path = root / relative
+        if path.resolve(strict=True) != path:
+            raise ValueError('Pilot archives must use their registered local paths')
+        return path
+
+    frozen = read_json(local('plan.json'))
+    plan = frozen['plan']
+    if (content_hash(plan) != frozen['plan_hash']
+            or content_hash(plan['protocol']) != JOINT_PILOT_PROTOCOL):
+        raise ValueError('Pilot plan does not match the frozen joint shock protocol')
+    execution = read_json(local('execution.json'))
+    seed = plan['protocol']['budget']['verification_root']
+    arms, opening = [], []
+    for arm in ('flat_weighted', 'shock_weighted'):
+        key = f'{seed}/{arm}'
+        path = local('worlds/' + key)
+        store = _inspection_store(path)
+        identity = store.identity
+        expected, = [row['config_hash'] for row in plan['assignments']
+                     if (row['root'], row['arm']) == (seed, arm)]
+        status = execution[key]
+        setting = plan['protocol']['arm_settings'][arm]
+        if (status['status'] != 'completed' or status['path'] != 'worlds/' + key
+                or (status['root'], status['arm']) != (seed, arm)
+                or identity.config_hash != expected or identity.config['root_seed'] != seed
+                or identity.config['security_feedback']['shock_enabled'] != setting['shock_enabled']
+                or identity.config['reference_loss']['lambda_bps'] != setting['lambda_bps']
+                or identity.code_hash != plan['implementation']['source_hash']
+                or identity.metadata['implementation']['code_commit'] not in (None, plan['git_commit'])
+                or identity.metadata['provider_mode'] != 'rule' or history(path)[-1]['status'] != 'completed'):
+            raise ValueError('Pilot arm does not match its registered completed execution')
+        periods = joint_timeline(store)
+        terminal = periods[-1]['cursor'] if periods else {}
+        if (terminal.get('tick') != plan['protocol']['clock']['terminal_tick']
+                or terminal.get('state_hash') != status['state_hash']):
+            raise ValueError('Pilot arm terminal commit differs from its execution receipt')
+        opening.append([m.state_hash for m in store.markers() if m.tick <= 1])
+        arms.append({'arm': arm, 'seed': seed, 'data_origin': identity.metadata['data_origin'],
+                     'commit': plan['git_commit'], 'source_hash': identity.code_hash, 'run_status': status['status'],
+                     'periods': periods})
+    if opening[0] != opening[1]:
+        raise ValueError('Pilot arm initial and warmup states diverge')
+    differences = []
+    for left, right in zip(*(arm['periods'] for arm in arms), strict=True):
+        tick = left['cursor']['tick']
+        if tick != right['cursor']['tick']:
+            raise ValueError('Pilot arm clocks differ')
+        metric_delta = {key: right['metrics'][key] - value
+                        if value is not None and right['metrics'][key] is not None else None
+                        for key, value in left['metrics'].items()}
+        differences.append({'tick': tick, 'metrics': metric_delta})
+    return {'audience': 'researcher', 'schema_version': 1, 'authority': False,
+            'protocol_id': plan['protocol']['protocol_id'], 'plan_hash': frozen['plan_hash'],
+            'arms': arms, 'difference': 'shock_weighted - flat_weighted', 'differences': differences}
 
 
 def _read_arm(store, ticks, audience, actor, baseline_tick):

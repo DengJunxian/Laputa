@@ -13,6 +13,7 @@ import uuid
 from civitas.application import economic_run
 from civitas.application.workbench import open_workspace
 from civitas.application.workbench_http import WorkbenchServer
+from civitas.contracts.base import content_hash
 from civitas.core.world import WorldKernel
 from civitas.experiments.labor_choice_preview import audit_labor_choice, run_labor_choice
 from civitas.experiments.registry import history
@@ -27,10 +28,11 @@ CONFIG = {'households': 4, 'firms': 2, 'ticks': 5, 'archive_observations': True,
 
 @contextmanager
 def service(root, *, supplier_preview=None, choice_previews=(), withdrawal_template=None, labor_template=None,
-            previews=None):
+            previews=None, joint_template=None, joint_pilot=None):
     with (
         open_workspace(root, CONFIG, supplier_preview=supplier_preview, choice_previews=choice_previews,
-                       withdrawal_template=withdrawal_template, labor_template=labor_template) as workbench,
+                       withdrawal_template=withdrawal_template, labor_template=labor_template,
+                       joint_template=joint_template, joint_pilot=joint_pilot) as workbench,
         WorkbenchServer(workbench, 0, previews=previews) as server,
     ):
         thread = Thread(target=server.serve_forever)
@@ -74,6 +76,7 @@ def wait_state(server, key, expected):
 
 
 WITHDRAWAL = Path(__file__).resolve().parents[1]/'examples'/'closed-economy-bank-notice.json'
+JOINT = read_json(WITHDRAWAL.with_name('closed-economy-security-feedback.json'))
 REGISTRATION = '/api/withdrawal-registration'
 WITHDRAWAL_DOWNLOAD = '/api/choice-download?kind=withdrawal&tick=5'
 
@@ -95,6 +98,98 @@ def wait_registration(server, expected, *, kind='withdrawal'):
 
 class LocalWorkbenchTests(unittest.TestCase):
 
+    def test_registered_joint_world_inspection_and_observer_boundaries(self):
+        with TemporaryDirectory() as tmp, service(Path(tmp), joint_template={
+            **JOINT, 'observation_archive_format': 'observe.v2',
+            'reference_loss': read_json(WITHDRAWAL.with_name('reference-loss-settings.json')),
+        }) as server:
+            self.assertEqual(server.server_address[0], '127.0.0.1')
+            template = request(server, '/api/status')[1]['joint_template']
+            self.assertEqual(request(server, '/api/control', command('freeze-joint-template', expected_hash='bad'))[0], 400)
+            freeze = command('freeze-joint-template', expected_hash=template['config_hash'])
+            first = request(server, '/api/control', freeze)
+            self.assertEqual(request(server, '/api/control', freeze), first)
+            key = first[1]['job']
+            workspace = server.workbenches['']
+            self.assertEqual(workspace.load(key)['registered_template'], template['id'])
+            request(server, '/api/control', command('start', job=key, until=2))
+            wait_state(server, key, 'paused')
+            timeline = f'/api/timeline?job={key}'
+            self.assertEqual([row['cursor']['tick'] for row in request(server, timeline)[1]['periods']], [1, 2])
+            request(server, '/api/control', command('resume', job=key, until=None))
+            final = wait_state(server, key, 'completed')
+            periods = request(server, timeline)[1]['periods']
+            self.assertEqual([row['cursor']['tick'] for row in periods], list(range(1, 6)))
+            self.assertEqual(periods[1]['metrics']['realized_close_minor'], 100)
+            self.assertEqual(periods[2]['metrics']['security_mark_minor'], 10)
+            self.assertIsNone(periods[2]['metrics']['realized_close_minor'])
+            self.assertEqual(periods[2]['metrics']['consumed_units'], 10)
+            self.assertEqual(periods[-1]['cursor']['source_commit_hash'], final['commit_hash'])
+            uri = f'/api/view?job={key}&tick=3'
+            global_view = request(server, uri)[1]['views'][0]
+            layers = global_view['relation_layers']
+            self.assertEqual(set(layers), {'communication','employment','credit','holdings'})
+            self.assertEqual(layers['employment']['total'], 8)
+            self.assertEqual(layers['credit']['edges'][0][:2], ['bank:a', 'household:0003'])
+            self.assertTrue(all(len(layer['edges']) <= layer['limit'] for layer in layers.values()))
+            marker = global_view['cursor']['source_commit_hash']
+            index = request(server, '/api/research-index', {'job':key,'tick':3,'commit':marker})[1]
+            self.assertEqual(sum(row['security_units'] for row in index['accounts']['rows']), 4)
+            actor = next(row[0] for row in layers['holdings']['edges'] if row[0].startswith('household:'))
+            actor_view = request(server, uri + '&actor=' + actor)[1]['views'][0]
+            self.assertEqual(actor_view['researcher_settlement'][0]['rows'][0][1]['security_wealth_response'][
+                'reserve_increase_minor'], 180)
+            self.assertIn(f'security-wealth:3:{actor}', str(actor_view['sections']))
+            token = request(server, '/api/grant', {'job':key,'actor':actor})[1]['url'].split('#')[1]
+            observer = request(server, uri, token=token)[1]['views'][0]
+            self.assertEqual(observer, {k:v for k,v in actor_view.items() if k != 'researcher_settlement'})
+            self.assertEqual(request(server, f'/api/view?job={key}&tick=0', token=token)[1]['status'], 'unrecorded_observe')
+            self.assertEqual(request(server, uri + '&actor=household:0003', token=token)[0], 403)
+            for restricted in (timeline, '/api/joint-pilot', '/api/joint-pilot-download'):
+                self.assertEqual(request(server, restricted, token=token)[0], 403)
+            self.assertEqual(request(server, '/api/control', freeze, token=token)[0], 403)
+            self.assertNotIn('joint_template', request(server, '/api/status', token=token)[1])
+            path = workspace.run_path(key)
+            report = asyncio.run(economic_run.replay_run(path, destination=Path(tmp) / 'replay'))
+            self.assertEqual((report['status'], report['compared_ticks'], report['external_api_calls'],
+                              report['applied_deltas_to_execution']), ('matched', 5, 0, False))
+
+    def test_joint_pilot_pair_reads_committed_metrics_and_checks_provenance(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pilot = root / 'pilot'
+            protocol = read_json(WITHDRAWAL.with_name('joint-shock-protocol.v1.json'))
+            implementation = economic_run.current_implementation()
+            plan = dict(protocol=protocol, git_commit=implementation['code_commit'],
+                        implementation=implementation, assignments=[])
+            execution = {}
+            seed = protocol['budget']['verification_root']
+            for arm in ('flat_weighted', 'shock_weighted'):
+                settings = protocol['arm_settings'][arm]
+                path = f'worlds/{seed}/{arm}'
+                config = {**JOINT, 'root_seed': seed, 'reference_loss': {
+                    'lambda_bps': settings['lambda_bps'], 'peer_disclosure': True},
+                    'security_feedback': {**JOINT['security_feedback'], 'shock_enabled':settings['shock_enabled']}}
+                result = asyncio.run(economic_run.run_new(config, pilot / path))
+                key = f'{seed}/{arm}'
+                execution[key] = dict(status=result['status'], state_hash=result['state_hash'],
+                                      path=path, arm=arm, root=seed)
+                identity = CommitStore(pilot / path).identity
+                plan['assignments'].append(dict(root=seed, arm=arm, config_hash=identity.config_hash))
+            atomic_json(pilot / 'plan.json', {'plan':plan, 'plan_hash':content_hash(plan)})
+            atomic_json(pilot / 'execution.json', execution)
+            with service(root / 'workspace', joint_pilot=pilot) as server:
+                code, data = request(server, '/api/joint-pilot')
+                self.assertEqual(code, 200)
+                self.assertEqual(request(server, '/api/joint-pilot-download'), (200, data))
+                self.assertEqual(data['differences'][2]['metrics']['consumed_units'], -6)
+                self.assertIsNone(data['differences'][2]['metrics']['realized_close_minor'])
+                self.assertEqual(data['arms'][1]['source_hash'], implementation['source_hash'])
+                self.assertEqual(data['arms'][1]['run_status'], 'completed')
+                self.assertEqual(data['arms'][1]['periods'][-1]['cursor']['state_hash'], result['state_hash'])
+                execution[key]['state_hash'] = 'invalid'
+                atomic_json(pilot / 'execution.json', execution)
+                self.assertEqual(request(server, '/api/joint-pilot-download')[0], 400)
 
     def test_research_preview_capability_stays_in_its_workspace(self):
         template = read_json(WITHDRAWAL.with_name('closed-economy-labor-choice-preview.json'))

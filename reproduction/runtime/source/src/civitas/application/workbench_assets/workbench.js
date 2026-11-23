@@ -10,6 +10,10 @@ const goodsMetrics = [['wages_paid_minor','实付工资'],['produced_units','产
   ['treasury_cash_minor','国库现金']];
 const securityMetrics = [['security_close_minor','成交收盘价'],['security_volume_units','成交量（份）'],
   ['security_fill_count','成交笔数']];
+const jointMetrics = [['security_mark_minor','证券标价'],['realized_close_minor','成交收盘价'],
+  ['consumed_units','消费（件）'],['firm_sales_minor','企业销售额'],['wages_paid_minor','实付工资'],
+  ['bank_reserves_minor','银行准备金'],['treasury_cash_minor','国库现金']];
+const jointArms = {flat_weighted:'无冲击 · 权重 2', shock_weighted:'有冲击 · 权重 2'};
 const supplierMetrics = [['visible_quotes','授权报价'],['supplier','选择的供应商'],
   ['settled_units','实付采购量（件）'],['buyer_debit_minor','买方实付'],
   ['supplier_credit_minor','卖方实收'],['attempts','归档尝试'],['successful_attempts','成功尝试'],
@@ -20,6 +24,7 @@ let listSignature = '', compareSignature = '', canGrant = false, supplierPreview
 let requestedStatus = 0, appliedStatus = 0;
 let choiceArchive = false, choicePreviews = [], interventionTemplates = [];
 let registration = null, registrationBusy = false;
+let jointTemplate = null;
 const terminalRegistration = new Set(['completed','failed','interrupted']);
 const registrationStates = {...stateNames, empty:'待登记', registering:'正在冻结归档', ready:'已登记',
   not_started:'未启动', incomplete:'未完成', completed:'已完成', failed:'失败'};
@@ -59,6 +64,7 @@ function options(select, first, values) {
 
 function render() {
   ui('freeze').disabled = ui('fork-freeze').disabled = ui('template-freeze').disabled = busy;
+  ui('joint-freeze').disabled = busy;
   const job = jobs.find(row => row.id === selected);
   ui('empty').hidden = Boolean(job) || role !== 'researcher';
   ui('run').hidden = !job;
@@ -187,6 +193,13 @@ async function refresh() {
     ui('actor-label').hidden = ui('compare-label').hidden = role !== 'researcher';
     ui('scope').textContent = role === 'researcher' ? '研究者' : data.actor;
     if (role === 'researcher') ui('config').value = data.template;
+    jointTemplate = data.joint_template;
+    if (jointTemplate) {
+      ui('joint-template').hidden = false;
+      ui('joint-template-info').textContent = `${jointTemplate.ticks} 期 · ${jointTemplate.config_hash.slice(0,12)}`;
+      ui('joint-template-info').title = jointTemplate.config_hash;
+    }
+    ui('joint-pilot').hidden = !data.joint_pilot;
     selected = jobs.at(-1)?.id ?? null;
   }
   render();
@@ -246,11 +259,12 @@ async function send(action, fields, rawConfig) {
     const receipt = await (await request('/api/control', body)).json();
     pending.delete(signature);
     await refresh();
-    if (['freeze','fork','freeze-intervention'].includes(action)) {
+    if (['freeze','fork','freeze-intervention','freeze-joint-template'].includes(action)) {
       selectJob(receipt.job, false);
       if (action === 'freeze') ui('configure').open = false;
     }
-    notice({freeze:'已冻结配置。','freeze-intervention':'已冻结处理臂。',fork:'已冻结分支。',start:'已启动。',resume:'已请求恢复。',
+    notice({freeze:'已冻结配置。','freeze-intervention':'已冻结处理臂。','freeze-joint-template':'已冻结联合配置。',
+      fork:'已冻结分支。',start:'已启动。',resume:'已请求恢复。',
       pause:'将在当前期完成后暂停。',cancel:'已提交取消请求。'}[action]);
   } catch (error) {
     if (error.status && error.status < 500) pending.delete(signature);
@@ -278,10 +292,12 @@ function makeTable(columns, rows) {
     const line = node('tr');
     for (const value of row) {
       const cell = node('td');
-      if (value !== null && typeof value === 'object') {
+      if (value instanceof HTMLElement) {
+        cell.append(value);
+      } else if (value !== null && typeof value === 'object') {
         const details = node('details');
         const kinds = {labor_income_shock:'缩时与实付凭据', bank_statement:'银行账单',
-          closed_social_context:'社会情境', fiscal_announcement:'财政公告'};
+          closed_social_context:'社会情境', fiscal_announcement:'财政公告', security_wealth:'可见证券估值'};
         const label = kinds[value.kind] ?? '查看详情';
         details.open = value.kind === 'labor_income_shock';
         details.append(node('summary',label),node('pre',JSON.stringify(value,null,2)));
@@ -361,13 +377,15 @@ function ledgerAudit(key, cursor, label) {
       const {metrics, denominators, accounts} = data;
       currentPage = accounts.page;
       lastPage = Math.ceil(accounts.total / accounts.page_size);
+      const positions = Object.hasOwn(accounts.rows[0] ?? {}, 'security_units');
       tables.replaceChildren(
         makeTable(['账本复算','数值'], [['现金总额',metrics.cash_minor],['产出（件）',metrics.produced_units],
           ['消费（件）',metrics.consumed_units],['主体数',metrics.actor_count],['决策数',denominators.decisions],
           ['回执数',denominators.receipts]]),
-        makeTable(['账户','现金','库存（件）','应收工资','存款资产','准备金'], accounts.rows.map(row =>
+        makeTable(['账户','现金','库存（件）','应收工资','存款资产','准备金',
+          ...(positions ? ['证券份额','贷款负债'] : [])], accounts.rows.map(row =>
           [row.account_id,row.cash_minor,row.goods_units,row.wage_receivable_minor,row.deposit_asset_minor,
-            row.bank_reserve_minor])));
+            row.bank_reserve_minor, ...(positions ? [row.security_units,row.loan_payable_minor] : [])])));
       status.textContent = `第 ${cursor.tick} 期 · 第 ${currentPage} / ${lastPage} 页 · ${accounts.total} 个账户`;
       status.title = cursor.source_commit_hash;
       build.hidden = true;
@@ -399,7 +417,50 @@ const interventionMetrics = {
   disclosure_paid_minor:'公告成本', treasury_cash_minor:'国库现金',
 };
 const edgeNames = {communication:'通信联系', deposit:'存款债权', credit:'贷款敞口',
-  fill:'实际成交', delivered_message:'已见消息'};
+  fill:'实际成交', delivered_message:'已见消息', employment:'当期已履约雇佣', holdings:'证券持仓'};
+
+function jointRelations(layers) {
+  const details = node('details'), label = node('label','关系层'), select = node('select');
+  const body = node('div');
+  details.append(node('summary','多层关系'), label, body);
+  label.append(select);
+  select.replaceChildren(...Object.keys(layers).map(key => new Option(edgeNames[key],key)));
+  function update() {
+    const {edges, total, limit} = layers[select.value];
+    const note = edges.length < total ? `显示 ${total} 条中的 ${limit} 条，按来源和目标 ID 排序。`
+      : `${total} 条关系`;
+    const graph = network(null, edges);
+    graph.open = true;
+    graph.querySelector('summary').textContent = edgeNames[select.value];
+    body.replaceChildren(node('p',note), graph);
+  }
+  select.addEventListener('change', update);
+  update();
+  return details;
+}
+
+function timelineTable(periods, onSelect) {
+  return makeTable(['期次','提交', ...jointMetrics.map(([,label]) => label),'分企业销售额'],
+    periods.map(({cursor,metrics,sales_by_firm_minor}) => {
+      const period = onSelect ? node('button',`第 ${cursor.tick} 期`) : cursor.tick;
+      if (onSelect) period.addEventListener('click', () => onSelect(cursor.tick));
+      const hash = node('code',cursor.source_commit_hash.slice(0,12));
+      hash.title = cursor.source_commit_hash;
+      return [period, hash, ...jointMetrics.map(([key]) => metrics[key]), sales_by_firm_minor];
+    }));
+}
+
+async function showJointTimeline(key, target) {
+  try {
+    const data = await (await request('/api/timeline?' + new URLSearchParams({job:key}))).json();
+    if (!target.isConnected) return;
+    if (!data.periods.length) {
+      target.textContent = '等待首个结算期提交。';
+      return;
+    }
+    target.replaceChildren(timelineTable(data.periods, tick => {ui('tick').value = tick; readView();}));
+  } catch (error) { if (target.isConnected) target.textContent = error.message; }
+}
 
 function interventionView(view) {
   const {plan, timeline, individuals, ledger, network: edges} = view.intervention_evolution;
@@ -470,12 +531,28 @@ function showView(data, other, key, otherKey, tick) {
   }
   if (view.intervention_evolution) result.append(interventionView(view));
   if (partner?.intervention_evolution) result.append(interventionView(partner));
+  if (view.joint_world) {
+    const timeline = node('details'), target = node('div','正在读取提交期次…');
+    timeline.open = true;
+    timeline.append(node('summary','期次时间轴'), target);
+    result.append(timeline, jointRelations(view.relation_layers));
+    showJointTimeline(key,target);
+  }
   if (!view.intervention_evolution && view.communication_edges) result.append(network(view));
   for (const section of view.sections) {
     const details = node('details');
     details.open = data.audience === 'agent' && section.key === 'market';
     details.append(node('summary',section.label), makeTable(section.columns,section.rows));
     result.append(details);
+  }
+  if (view.researcher_settlement) {
+    result.append(node('h3','研究者可见 · 提交后的结果'));
+    for (const section of view.researcher_settlement) {
+      const details = node('details');
+      details.open = section.key === 'actor_decision';
+      details.append(node('summary',section.label), makeTable(section.columns,section.rows));
+      result.append(details);
+    }
   }
 }
 
@@ -521,6 +598,7 @@ ui('validate').addEventListener('click', async () => {
   } catch (error) { notice(error.message,true); }
 });
 ui('freeze').addEventListener('click', () => send('freeze', {label:ui('run-label').value}, ui('config').value));
+ui('joint-freeze').addEventListener('click', () => send('freeze-joint-template', {expected_hash:jointTemplate.config_hash}));
 for (const action of ['start','resume','pause','cancel']) {
   ui(action).addEventListener('click', () => send(action, {job:selected,
     ...(['start','resume'].includes(action) ? {until:ui('until').value === '' ? null : Number(ui('until').value)} : {})}));
@@ -536,11 +614,11 @@ ui('fork-freeze').addEventListener('click', () => {
 ui('tick').addEventListener('input', clearView);
 for (const name of ['actor','compare']) ui(name).addEventListener('change', clearView);
 ui('read-view').addEventListener('click', readView);
-async function downloadCurrent() {
+async function downloadCurrent(path = currentExport) {
   const revision = readRevision;
-  if (!currentExport) return;
+  if (!path) return;
   try {
-    const response = await request(currentExport);
+    const response = await request(path);
     const body = await response.blob();
     if (revision !== readRevision) return;
     const url = URL.createObjectURL(body);
@@ -551,7 +629,31 @@ async function downloadCurrent() {
     setTimeout(() => URL.revokeObjectURL(url),1000);
   } catch (error) { if (revision === readRevision) notice(error.message,true); }
 }
-ui('download').addEventListener('click', downloadCurrent);
+ui('download').addEventListener('click', () => downloadCurrent());
+ui('joint-pilot-download').addEventListener('click', () => downloadCurrent('/api/joint-pilot-download'));
+ui('joint-pilot').addEventListener('toggle', async () => {
+  if (!ui('joint-pilot').open) return;
+  const status = ui('joint-pilot-status'), result = ui('joint-pilot-result');
+  if (result.childElementCount) return;
+  status.textContent = '正在核对两臂归档…';
+  status.classList.remove('error');
+  try {
+    const data = await (await request('/api/joint-pilot')).json();
+    const provenance = node('details');
+    provenance.append(node('summary','来源与执行状态'), makeTable(['处理臂','数据来源','随机根','代码提交','源码哈希','运行状态'],
+      data.arms.map(arm => [jointArms[arm.arm],arm.data_origin,arm.seed,arm.commit,arm.source_hash,arm.run_status])));
+    const trajectories = data.arms.map(arm => {
+      const group = node('details');
+      group.append(node('summary',jointArms[arm.arm]),timelineTable(arm.periods));
+      return group;
+    });
+    result.replaceChildren(provenance,...trajectories, node('h3','逐期差值 · 有冲击减无冲击'),
+      makeTable(['期次',...jointMetrics.map(([,label]) => label)], data.differences.map(row =>
+        [row.tick,...jointMetrics.map(([key]) => row.metrics[key])])));
+    status.textContent = '— 表示该期缺少可比值。';
+    ui('joint-pilot-download').disabled = false;
+  } catch (error) { status.textContent = error.message; status.classList.add('error'); }
+});
 ui('grant').addEventListener('click', async () => {
   const revision = readRevision;
   try {
@@ -666,7 +768,7 @@ async function readChoice() {
 
 ui('choice-kind').addEventListener('change', chooseExperiment);
 ui('choice-tick').addEventListener('change', readChoice);
-ui('choice-download').addEventListener('click', downloadCurrent);
+ui('choice-download').addEventListener('click', () => downloadCurrent());
 ui('choice-arm').addEventListener('change', () => { ui('choice-link').hidden = true; });
 ui('choice-grant').addEventListener('click', async () => {
   const revision = readRevision;

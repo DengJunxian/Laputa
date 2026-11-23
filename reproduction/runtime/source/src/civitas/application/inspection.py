@@ -2,6 +2,8 @@
 from pathlib import Path
 
 from civitas.application.economic_run import APPLICATION, PROJECTION_TABLES
+from civitas.contracts.economic import SECURITY_ASSET
+from civitas.scenarios.closed_economy_relations import SOCIAL_FIELD, materialize_social
 from civitas.storage.commit_store import CommitStore, read_json
 from civitas.storage.history import file_hash
 
@@ -138,6 +140,46 @@ def _agent_payload(observation):
                      for m in payload['delivered_messages']]),
                 _section('memory','可见回执与记忆',['证据 ID','可见期','事实'],facts('private_memory_refs')),
             ]}
+
+
+def joint_actor_settlement(snapshot, actor):
+    economic = snapshot.data['economic_runtime']
+    tick = snapshot.tick
+    decision, = [row for row in snapshot.decisions if row.tick == tick and row.actor_id == actor]
+    receipts = [row.model_dump(mode='json') for row in snapshot.receipts
+                if row.tick == tick and row.actor_id == actor]
+    return [
+        _section('actor_decision', '该主体的已提交决策', ['决策 ID','主观判断','引用证据','执行意图'], [[
+            decision.decision_id, decision.model_dump(mode='json')['belief_patch'], list(decision.evidence_ids),
+            [row.model_dump(mode='json') for row in decision.economic_intents],
+        ]]),
+        _section('actor_receipts', '该主体的执行回执', ['命令','结果','数量','现金变化','关联分录'], [
+            [row[k] for k in ('command_id','outcome','executed_quantity','cash_delta_minor','ledger_tx_ids')]
+            for row in receipts
+        ]),
+        _section('actor_settlement_account', '该主体的期末账户与持仓', ['主体','账户余额','库存','证券份额'], [[
+            actor, economic['balances'].get(actor, {}), economic['goods'].get(actor),
+            economic['security_units'].get(actor, 0),
+        ]]),
+    ]
+
+
+def joint_relation_layers(snapshot):
+    economic = snapshot.data['economic_runtime']
+    contacts = materialize_social(snapshot.data[SOCIAL_FIELD], snapshot.tick).outgoing_contacts()
+    layers = {
+        'communication': [[actor, peer, 'communication', None] for actor, peers in contacts.items() for peer in peers],
+        'employment': [[row['worker_id'], row['employer_id'], 'employment', row['event_id']]
+                       for row in snapshot.data['closed_economy']['labor_events'] if row['tick'] == snapshot.tick],
+        'credit': [[loan['terms']['bank'], loan['terms']['actor'], 'credit',
+                    {'loan_id': loan_id, 'principal_minor': loan['principal_minor']}]
+                   for loan_id, loan in economic['bank_positions']['loans'].items() if loan['principal_minor'] > 0],
+        'holdings': [[actor, SECURITY_ASSET, 'holdings', units]
+                     for actor, units in economic['security_units'].items() if units],
+    }
+    return {name: {'edges': sorted(rows, key=lambda row: (row[0], row[1]))[:64],
+                   'total': len(rows), 'limit': 64, 'selection': 'first_by_actor_id'}
+            for name, rows in layers.items()}
 
 
 def _inspection_ticks(ticks, audience, actor):

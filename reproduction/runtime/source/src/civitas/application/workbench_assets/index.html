@@ -16,6 +16,11 @@
   <aside id="researcher" hidden aria-label="运行管理">
     <h1>运行</h1>
     <nav id="jobs" aria-label="运行列表"></nav>
+    <details id="joint-template" hidden open>
+      <summary>联合世界 · 证券冲击</summary>
+      <p id="joint-template-info" class="mono"></p>
+      <div class="actions"><button id="joint-freeze" class="primary">冻结联合配置</button></div>
+    </details>
     <details id="intervention-templates" hidden>
       <summary>冻结干预实验</summary>
       <label>干预模板<select id="template-kind"></select></label>
@@ -75,6 +80,12 @@
         <a id="choice-link" target="_blank" rel="noopener noreferrer" hidden>打开主体只读视图</a>
       </details>
     </section>
+    <details id="joint-pilot" hidden>
+      <summary>第 101 根 · 冻结冲击对照</summary>
+      <div class="actions"><button id="joint-pilot-download" disabled>导出对照 JSON</button></div>
+      <p id="joint-pilot-status" class="notice" role="status"></p>
+      <div id="joint-pilot-result"></div>
+    </details>
     <section id="run" hidden>
       <div class="run-heading"><div><h1 id="run-title"></h1><p id="cursor" class="mono"></p></div><span id="state" class="state"></span></div>
       <div id="controls" class="control" hidden>
