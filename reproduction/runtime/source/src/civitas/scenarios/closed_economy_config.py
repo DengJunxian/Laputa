@@ -6,7 +6,7 @@ from pydantic import Field, model_validator
 from civitas.contracts.households import HouseholdPopulation
 from civitas.economy.fiscal import FiscalPolicy
 from civitas.economy.banking import BankingConfig, actors_for
-from civitas.contracts.base import NonNegative, Positive, Record
+from civitas.contracts.base import Id, NonNegative, Positive, Record
 from civitas.contracts.economic import Amount, CooperationAction, PositiveAmount
 
 Bps = Annotated[int, Field(ge=0, le=10000)]
@@ -196,6 +196,21 @@ class SecurityFeedbackSettings(Record):
     wealth_observed: bool = True
 
 
+JOINT_CHOICE_TASK = 'joint_policy_choice'
+
+
+class JointPolicySeat(Record):
+    actor_id: Id
+    strategy: Literal['behavioral', 'structured']
+    ticks: list[Positive] = Field(min_length=1, max_length=16)
+    prudence_minor: Amount = 0
+
+
+class JointPolicySettings(Record):
+    source: Literal['synthetic_test', 'archived_response', 'live'] = 'synthetic_test'
+    seats: list[JointPolicySeat] = Field(min_length=1, max_length=3)
+
+
 class ConsumptionDemandSettings(Record):
     peer_uplift_units: Literal[0, 1] = 0
     hiring_adapts: bool = True
@@ -238,6 +253,7 @@ class ClosedEconomyConfig(Record):
     fiscal: FiscalPolicy | None = Field(default=None, exclude_if=lambda value: value is None)
     securities: SecurityMarketSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     security_feedback: SecurityFeedbackSettings | None = Field(default=None, exclude_if=lambda value: value is None)
+    joint_policy: JointPolicySettings | None = Field(default=None, exclude_if=lambda value: value is None)
     demand: ConsumptionDemandSettings | None = Field(default=None, exclude_if=lambda value: value is None)
     population_input: HouseholdPopulation | None = Field(default=None, exclude_if=lambda value: value is None)
     supplier_cognition: SupplierCognition | None = Field(default=None, exclude_if=lambda value: value is None)
@@ -295,10 +311,20 @@ class ClosedEconomyConfig(Record):
 
     @property
     def structured_sources(self):
-        return {settings.source for settings in (
+        sources = {settings.source for settings in (
             self.supplier_cognition, self.withdrawal_cognition, self.labor_cognition,
             self.cooperation_cognition, self.disclosure_cognition, self.credit_cognition,
         ) if settings is not None}
+        if self.joint_model_slots:
+            sources.add(self.joint_policy.source)
+        return sources
+
+    @property
+    def joint_model_slots(self):
+        if self.joint_policy is None:
+            return ()
+        return tuple((JOINT_CHOICE_TASK, seat.actor_id, tick)
+                     for seat in self.joint_policy.seats if seat.strategy == 'structured' for tick in seat.ticks)
 
     @property
     def cognition_mode(self):
@@ -332,6 +358,24 @@ class ClosedEconomyConfig(Record):
     def compatible_configuration(self):
         if not self.archive_observations and self.observation_archive_format != "observe.v1":
             raise ValueError("An indexed observation format requires observation archiving")
+        if self.joint_policy is not None:
+            policy = self.joint_policy
+            if self.security_feedback is None or not self.archive_observations or any((
+                    self.supplier_cognition, self.withdrawal_cognition, self.labor_cognition,
+                    self.cooperation_cognition, self.disclosure_cognition, self.credit_cognition,
+                    self.offline_cooperation_action)):
+                raise ValueError('Joint policy requires archived observations in the joint economy and owns its seats')
+            households = {f'household:{i:04d}' for i in range(self.households)}
+            firms = {f'firm:{i:02d}' for i in range(self.firms)}
+            actors = {seat.actor_id for seat in policy.seats}
+            if (len(actors) != len(policy.seats) or not actors <= households | firms
+                    or len(actors & households) > 2 or len(actors & firms) > 1
+                    or any(seat.ticks != sorted(set(seat.ticks)) or seat.ticks[-1] > self.ticks
+                           or (seat.strategy == 'behavioral' and seat.actor_id not in households)
+                           or (seat.strategy != 'behavioral' and seat.prudence_minor)
+                           for seat in policy.seats)
+                    or (not self.joint_model_slots and policy.source != 'synthetic_test')):
+                raise ValueError('Joint policy requires unique in-range seats for up to two households and one firm')
         if self.security_feedback is not None:
             holders = self.security_feedback.holder_indices
             security = self.securities
@@ -341,7 +385,7 @@ class ClosedEconomyConfig(Record):
                     or self.banking is None or len(self.banking.initial_bank_cash) != 2 or self.fiscal is None
                     or any((self.demand, self.cooperation, self.population_input, self.labor_income_shock,
                             self.stopping_hazard_bps))
-                    or self.cognition_mode != "rule"
+                    or (self.cognition_mode != "rule" and self.joint_policy is None)
                     or len(set(holders)) != len(holders) or len(holders) >= self.households
                     or max(holders) >= self.households):
                 raise ValueError("Security feedback requires the bounded offline joint economy and distinct household holders")

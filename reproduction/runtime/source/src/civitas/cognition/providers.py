@@ -3,8 +3,29 @@ from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
-from civitas.contracts.base import Id, NonNegative, Record
+from civitas.contracts.base import Digest, Id, NonNegative, Record, content_hash
 from .budget import Price
+
+
+class LiveModelEntry(Record):
+    provider: Literal['openai', 'deepseek']
+    model: Id
+    revision: Id
+    price: Price
+    pricing_reference: Id
+    verified_at: Id
+
+
+class LiveModelManifest(Record):
+    schema_version: Literal[1] = 1
+    entry: LiveModelEntry
+    entry_hash: Digest
+
+    @model_validator(mode='after')
+    def verify_entry(self):
+        if content_hash(self.entry) != self.entry_hash:
+            raise ValueError('Live model manifest digest mismatch')
+        return self
 
 
 class ProviderConfig(Record):
@@ -21,9 +42,14 @@ class ProviderConfig(Record):
     price: Price = Price(currency='USD', input_nano=0, output_nano=0)
     pricing_reference: str = ''
     verified_at: str = ''
+    model_manifest: LiveModelManifest | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode='after')
     def live_boundaries(self):
+        if self.model_manifest is not None and (
+                self.source == 'synthetic_test' or self.model_manifest.entry.model_dump() !=
+                self.model_dump(include=set(LiveModelEntry.model_fields))):
+            raise ValueError('Provider identity and tariff must match the pinned live model manifest')
         if self.source == 'live':
             endpoints = {'openai': 'https://api.openai.com/v1', 'deepseek': 'https://api.deepseek.com'}
             if self.endpoint != endpoints.get(self.provider):
@@ -32,10 +58,11 @@ class ProviderConfig(Record):
                 raise ValueError('Live model/pricing verification is required')
             if self.price.currency != ('USD' if self.provider == 'openai' else 'CNY'):
                 raise ValueError('Provider currency mismatch')
-            authorized = {'openai': ('gpt-6-luna', 250, 500), 'deepseek': ('deepseek-flash', 2000, 8000)}
-            model, incoming, outgoing = authorized[self.provider]
-            if self.model != model or self.price.input_nano < incoming or self.price.output_nano < outgoing:
-                raise ValueError('Live identity or tariff falls outside the verified WP05 authorization')
+            if self.model_manifest is None:
+                authorized = {'openai': ('gpt-6-luna', 250, 500), 'deepseek': ('deepseek-flash', 2000, 8000)}
+                model, incoming, outgoing = authorized[self.provider]
+                if self.model != model or self.price.input_nano < incoming or self.price.output_nano < outgoing:
+                    raise ValueError('Live identity or tariff falls outside the verified WP05 authorization')
         return self
 
     def wire_request(self, messages):
@@ -70,7 +97,9 @@ class SyntheticProvider:
         obs, context = request['observation'], request['task_context']
         evidence = sorted([f['fact_id'] for key in ('account_view', 'market_view', 'private_memory_refs') for f in obs[key]]
                           + [m['message_id'] for m in obs['delivered_messages']])
-        if request['task'] in ('reflection', 'cd_reflection'):
+        if request['task'] == 'joint_policy_choice':
+            body = {'action': 'cautious', 'evidence_id': context['decision_fact_id']}
+        elif request['task'] in ('reflection', 'cd_reflection'):
             body = {'actor_id': obs['actor_id'], 'observation_id': obs['observation_id'], 'evidence_ids': evidence[:1],
                     'semantic': ['Synthetic evidence-linked note.'] if evidence else [], 'procedural': []}
         elif request['task'] == 'cd_supplier':

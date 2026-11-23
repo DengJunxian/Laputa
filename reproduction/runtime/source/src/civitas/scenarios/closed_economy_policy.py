@@ -54,7 +54,8 @@ class ClosedEconomyPolicy:
         self.capabilities = ActionCapabilities.from_config(
             {"disabledActions": list(config.disabled_actions)})
 
-    async def decide(self, observation, *, supplier_scores=None, integrate_peer=True):
+    async def decide(self, observation, *, supplier_scores=None, integrate_peer=True,
+                     extra_reserve_minor=0, cautious=False):
         tick, actor = observation.visible_until.tick, observation.actor_id
         account_fact = observation.account_view[0]
         account = account_fact.value
@@ -148,7 +149,7 @@ class ClosedEconomyPolicy:
                     intents.append(LaborAcceptIntent(intent_id=prefix + ":labor", offer_id=offer.fact_id,
                                                     max_switch_fee_minor=offer.value.get("switch_fee_minor")))
                     break
-            reserve = profile["cash_reserve_minor"]
+            reserve = profile["cash_reserve_minor"] + extra_reserve_minor
             if behavior := profile.get("behavior"):
                 reserve += behavior["prudence_buffer_minor"]
             announcement = next((f for f in observation.market_view if f.value.get("kind") == "fiscal_announcement"), None)
@@ -203,7 +204,9 @@ class ClosedEconomyPolicy:
                 intents.append(ConsumeIntent(intent_id=prefix + ":consume-held",
                                              quantity_units=old_consumption))
             chosen, quantity = None, 0
-            if self.capabilities.is_enabled("purchase"):
+            if cautious:
+                intents.append(HoldIntent(intent_id=prefix + ":defer-purchase"))
+            elif self.capabilities.is_enabled("purchase"):
                 for _, _, seller, fact in ranked:
                     q = fact.value
                     quantity = affordable_quantity(target, own_units, q["available_units"],
@@ -265,7 +268,9 @@ class ClosedEconomyPolicy:
             current = profile["unit_price_minor"]
             sold = profile["last_sold_units"]
             capacity = profile["capacity_units"]
-            if capacity and sold >= capacity and account["goods_units"] <= capacity:
+            if cautious:
+                price = max(self.config.min_price_minor, current - self.config.price_adjustment_minor)
+            elif capacity and sold >= capacity and account["goods_units"] <= capacity:
                 price = min(self.config.max_price_minor, current + self.config.price_adjustment_minor)
             elif sold * 2 < capacity and account["goods_units"] > capacity:
                 price = max(self.config.min_price_minor, current - self.config.price_adjustment_minor)

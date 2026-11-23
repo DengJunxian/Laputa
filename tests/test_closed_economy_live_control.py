@@ -12,6 +12,8 @@ from civitas.cognition.budget import BudgetController, BudgetLimits, Price
 from civitas.cognition.invocations import ModelInvocationStore
 from civitas.cognition.providers import ProviderConfig
 from civitas.cognition.runtime import RunControlError
+from civitas.contracts.base import content_hash
+from civitas.storage.commit_store import atomic_json, read_json
 
 
 @unittest.skipUnless(importlib.util.find_spec('openai'), 'requires llm extra')
@@ -50,7 +52,7 @@ class ClosedEconomyLiveControlTests(unittest.IsolatedAsyncioTestCase):
         return patch('openai.AsyncOpenAI', mock_client)
 
     @staticmethod
-    def response(request, *, body=None, usage=True):
+    def response(request, *, body=None, usage=True, model='gpt-6-luna'):
         import httpx
         wire = json.loads(request.content)
         obs = json.loads(wire['input'][1]['content'])['observation']
@@ -59,10 +61,55 @@ class ClosedEconomyLiveControlTests(unittest.IsolatedAsyncioTestCase):
             body = json.dumps({'actor_id': obs['actor_id'], 'observation_id': obs['observation_id'],
                 'scores_bps': {q['value']['seller_id']: 5000 for q in quotes},
                 'evidence_ids': [q['fact_id'] for q in quotes]})
-        return httpx.Response(200, json={'id': 'resp_mock', 'status': 'completed', 'model': 'gpt-6-luna',
+        return httpx.Response(200, json={'id': 'resp_mock', 'status': 'completed', 'model': model,
             'output': [{'type': 'message', 'id': 'message', 'role': 'assistant', 'status': 'completed',
                         'content': [{'type': 'output_text', 'text': body, 'annotations': []}]}],
             'usage': {'input_tokens': 100, 'output_tokens': 20, 'total_tokens': 120, 'input_tokens_details': {'cached_tokens': 0}, 'output_tokens_details': {'reasoning_tokens': 0}} if usage else None})
+
+    async def test_joint_manifest_revision_and_frozen_run_with_mock_transport(self):
+        fixture = Path(__file__).resolve().parents[1] / 'examples/closed-economy-security-feedback.json'
+        config = {**read_json(fixture), 'joint_policy': {'source': 'live', 'seats': [
+            {'actor_id': 'household:0001', 'strategy': 'structured', 'ticks': [3]}]}}
+        entry = {**self.provider.model_dump(include={'provider', 'price', 'pricing_reference', 'verified_at'}),
+                 'model': 'unlisted-mock-model', 'revision': 'unlisted-mock-model-v2'}
+        options = {**self.options(1), 'provider_config': {
+            **self.provider.model_dump(mode='json'), **entry,
+            'model_manifest': {'entry': entry, 'entry_hash': content_hash(entry)}}}
+        dispatched = []
+
+        async def handle(request):
+            wire = json.loads(request.content)
+            self.assertEqual(wire['model'], entry['model'])
+            prompt = json.loads(wire['input'][1]['content'])
+            dispatched.append(prompt['observation']['actor_id'])
+            body = {'action': 'cautious', 'evidence_id': prompt['task_context']['decision_fact_id']}
+            model = entry['revision'] if len(dispatched) == 1 else entry['model']
+            return self.response(request, body=json.dumps(body), model=model)
+
+        with self.assertRaisesRegex(ValueError, 'pinned model manifest'):
+            runner.create_run(config, self.folder / 'missing-manifest', **self.options(1))
+        frozen = self.folder / 'frozen'
+        with self.mock_sdk(handle):
+            original = await runner.run_new(config, frozen, **options)
+            with self.assertRaisesRegex(RunControlError, 'provider_identity_mismatch'):
+                await runner.run_new(config, self.folder / 'wrong-revision', **options)
+        self.assertEqual(dispatched, ['household:0001', 'household:0001'])
+        self.assertEqual(original['model_usage']['attempts'][0]['accounted_upper_bound_nano'], 35000)
+        failed, _, head = runner.open_run(self.folder / 'wrong-revision')
+        attempt, = failed.model_runtime.store.records(run_id='wrong-revision')
+        self.assertEqual((head.tick, attempt['state'], attempt['error']['code'], attempt['accounted']),
+                         (2, 'failed', 'provider_identity_mismatch', 35000))
+        with self.mock_sdk(lambda _: self.fail('verification called the network')):
+            replay = await runner.replay_run(frozen, destination=self.folder / 'verify-joint')
+        self.assertEqual((replay['status'], replay['state_hash']), ('matched', original['state_hash']))
+        path = frozen / 'identity.json'
+        identity = read_json(path)
+        changed = {**entry, 'price': {**entry['price'], 'output_nano': 501}}
+        identity['metadata']['provider_config'].update(
+            **changed, model_manifest={'schema_version': 1, 'entry': changed, 'entry_hash': content_hash(changed)})
+        atomic_json(path, identity)
+        with self.assertRaisesRegex(ValueError, 'identity'):
+            runner.open_run(frozen)
 
     async def test_real_sdk_with_mock_http_retries_once_and_archives_attempt_sequence(self):
         root = self.folder / 'retry'

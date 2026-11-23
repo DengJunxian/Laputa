@@ -80,9 +80,10 @@ def create_run(config, destination, *, run_id=None, terminal_tick=None,
         from civitas.cognition.supplier_archive import MAX_ARCHIVE_SLOTS
 
         choice_slots = config.choice_slots
+        joint_slots = config.joint_model_slots
         slots = (len(supplier.household_indices)
                  * (len(supplier.ticks) + ((len(supplier.ticks) - 1) if supplier.reflect else 0))) if supplier else 0
-        slots = slots + len(choice_slots) or 1
+        slots = slots + len(choice_slots) + len(joint_slots) or 1
         if config.cognition_mode != 'live' and slots > MAX_ARCHIVE_SLOTS:
             raise ValueError('The structured offline schedule exceeds the response archive capacity')
         if config.cognition_mode == 'archived_response':
@@ -92,6 +93,8 @@ def create_run(config, destination, *, run_id=None, terminal_tick=None,
                 raise ValueError('Live C/D requires a provider descriptor, cumulative project ledger and run budget')
             import importlib.metadata
             provider = ProviderConfig.model_validate(provider_config)
+            if joint_slots and provider.model_manifest is None:
+                raise ValueError('Live joint strategy requires a pinned model manifest')
             limits = BudgetLimits.model_validate(limits)
             if provider.source != 'live' or (config.population_input is not None
                                              and config.population_input.data_origin != 'synthetic'):
@@ -112,14 +115,16 @@ def create_run(config, destination, *, run_id=None, terminal_tick=None,
             control = destination.with_name(destination.name + '-model-control.sqlite')
             control.parent.mkdir(parents=True, exist_ok=True)
             control.touch(exist_ok=False)
-            model = ('synthetic-cd-supplier' if supplier is not None else
+            model = ('synthetic-joint-policy' if joint_slots else
+                     'synthetic-cd-supplier' if supplier is not None else
                      f'synthetic-cd-{choice_slots[0][0][3:]}' if choice_slots else 'synthetic-cd-cooperation')
             provider = ProviderConfig(model=model, revision='fixture-v1', max_attempts=1)
             limits = BudgetLimits(usd_nano=0, cny_nano=0, max_attempts=slots,
                                   max_tokens=slots * (provider.max_input_tokens + provider.max_output_tokens))
         metadata.update(control_ledger=str(control), provider_config=provider.model_dump(mode='json'),
                         budget_limits=limits.model_dump(mode='json'))
-        runtime = runtime_for(config, metadata, run_id, run_id, run_id, cd_structured=supplier is not None or bool(choice_slots))
+        runtime = runtime_for(config, metadata, run_id, run_id, run_id,
+                              cd_structured=supplier is not None or bool(choice_slots or joint_slots))
     world = build_closed_economy(config, runtime=runtime)
     store = CommitStore.create(destination, world, config=config.model_dump(mode='json'),
         code_hash=implementation['source_hash'], run_id=run_id, metadata=metadata)
@@ -139,7 +144,7 @@ def _create_archived_run(config, destination, run_id, metadata, response_archive
     if not config.supplier_cognition and len(config.choice_slots) == 1:
         task, seat, tick = config.choice_slots[0]
         archive.validate_choice_slot(task, f'household:{seat:04d}', tick)
-    elif config.choice_slots:
+    elif config.choice_slots or config.joint_model_slots:
         archive.validate_registration(config)
     else:
         archive.validate_slots(config.supplier_cognition)
@@ -208,8 +213,9 @@ def _restore_model_runtime(config, store, *, replay_path=None):
             raise ValueError('Frozen response archive hash mismatch')
         tape = archive.replay_rows()
     runtime = runtime_for(config, identity.metadata, identity.run_id, identity.lineage_id, identity.branch_id,
-                          replay_path=replay_path, tape=tape,
-                          reopening=True, cd_structured=config.supplier_cognition is not None or bool(config.choice_slots))
+                          replay_path=replay_path, tape=tape, reopening=True,
+                          cd_structured=config.supplier_cognition is not None
+                          or bool(config.choice_slots or config.joint_model_slots))
     if replay_path is None:
         verify_model_ledger((store,), runtime.store)
         store.receipt_reader = lambda: runtime.store.records(run_id=identity.run_id)

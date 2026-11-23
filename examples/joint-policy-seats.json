@@ -1,0 +1,21 @@
+{
+  "source": "synthetic_test",
+  "seats": [
+    {
+      "actor_id": "household:0000",
+      "strategy": "behavioral",
+      "ticks": [1, 2, 3, 4, 5],
+      "prudence_minor": 49
+    },
+    {
+      "actor_id": "household:0001",
+      "strategy": "structured",
+      "ticks": [3, 4]
+    },
+    {
+      "actor_id": "firm:00",
+      "strategy": "structured",
+      "ticks": [3]
+    }
+  ]
+}

@@ -167,7 +167,9 @@ class CognitiveRuntime:
             error, value = None, None
             if not response.ok:
                 error = {'code': response.error_code or 'provider_error'}
-            elif (response.provider != self.config.provider or response.model not in {self.config.model, self.config.revision}
+            elif (response.provider != self.config.provider
+                    or response.model not in {self.config.model, self.config.revision}
+                    or (self.config.model_manifest is not None and response.model != self.config.revision)
                     or (self.config.source == 'live' and response.origin != 'live')):
                 error = {'code': 'provider_identity_mismatch'}
             else:

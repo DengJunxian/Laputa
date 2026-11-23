@@ -12,7 +12,8 @@ from .providers import ProviderConfig, ProviderResponse
 
 MAX_ARCHIVE_SLOTS = 248
 SUPPLIER_TASKS = ('cd_supplier', 'cd_reflection')
-CHOICE_TASKS = ('cd_withdrawal', 'cd_labor', 'cd_cooperation_choice', 'cd_disclosure_choice', 'cd_credit')
+CHOICE_TASKS = ('cd_withdrawal', 'cd_labor', 'cd_cooperation_choice', 'cd_disclosure_choice', 'cd_credit',
+                'joint_policy_choice')
 
 
 class SupplierArchiveRow(Record):
@@ -67,6 +68,7 @@ class SupplierResponseArchive(Record):
 
     def validate_registration(self, config):
         slots = {(task, f'household:{seat:04d}', tick) for task, seat, tick in config.choice_slots}
+        slots.update(config.joint_model_slots)
         for row in self.records:
             request, observation = row.request, row.request['observation']
             key = (request['task'], observation['actor_id'], observation['visible_until']['tick'])

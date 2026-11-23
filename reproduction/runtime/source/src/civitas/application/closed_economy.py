@@ -9,6 +9,7 @@ from civitas.scenarios.closed_economy_relations import ClosedEconomyObserver
 from civitas.scenarios.closed_economy_cognition import (
     LaborModelPolicy, OfflineCooperationPolicy, SocialChoicePolicy, SupplierModelPolicy, WithdrawalModelPolicy,
 )
+from civitas.scenarios.joint_policy import JointPolicyAdapter
 from civitas.cognition.memory import MemoryBook
 from .cognition import bind_invocation_receipts
 
@@ -29,10 +30,15 @@ def build_closed_economy(config, *, policy=None, runtime=None, phase_hook=None):
             rng=rng, actors=scenario.actors, events=scenario.events, concurrency=config.concurrency,
             phase_hook=phase_hook, participants=scenario.participants, schema_version=4)
     scenario = ClosedEconomy(config)
-    if (runtime is not None) != (config.cognition_mode != 'rule') or (runtime is not None and policy is not None):
+    if ((runtime is not None) != (config.cognition_mode != 'rule')
+            or (policy is not None and (runtime is not None or config.joint_policy is not None))):
         raise ValueError('Cognition requires its configured policy and model runtime')
     policy = policy or ClosedEconomyPolicy(config, rng)
     participants = list(scenario.participants)
+    if config.joint_policy is not None:
+        memory = MemoryBook([seat.actor_id for seat in config.joint_policy.seats])
+        participants.append(memory)
+        policy = JointPolicyAdapter(policy, runtime, memory, config.joint_policy.seats)
     if config.supplier_cognition is not None:
         actors = [scenario.households[i] for i in config.supplier_cognition.household_indices]
         memory = MemoryBook(actors)
